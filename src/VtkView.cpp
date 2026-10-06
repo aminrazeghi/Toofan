@@ -32,6 +32,9 @@ const ColorMap &colorMapNamed(const QString &name)
 #ifdef WINDTUNNEL_HAS_VTK
 #include <vtkActor.h>
 #include <vtkArrowSource.h>
+#include <vtkAxesActor.h>
+#include <vtkCaptionActor2D.h>
+#include <vtkTextActor.h>
 #include <vtkBillboardTextActor3D.h>
 #include <vtkAppendPolyData.h>
 #include <vtkCamera.h>
@@ -348,6 +351,9 @@ public:
     vtkNew<vtkPolyDataMapper> outlineMapper, inletMapper, arrowMapper;
     vtkNew<vtkActor> outlineActor, inletActor, arrowActor;
     vtkNew<vtkBillboardTextActor3D> inletLabel;
+    vtkNew<vtkAxesActor> axes;                   // X/Y/Z marker at the inlet corner
+    vtkSmartPointer<vtkPolyData> rawStl;         // STL as read, before rotation
+    QVector3D rotation;                          // rotation applied in stlMapper
     double tunnelView[6] = {0, -1, 0, -1, 0, -1}; // tunnel plus inlet arrow, for framing
     QString stlPath;                             // STL currently in stlMapper
     bool hasStl = false;
@@ -359,6 +365,7 @@ vtkStandardNewMacro(PreviewScene);
 
 struct SceneState {
     QString stlPath;
+    QVector3D rotation;
     std::shared_ptr<const CasePreview> preview;
     QString colorMap;
     bool darkTheme = true;
@@ -436,6 +443,21 @@ void setupScene(PreviewScene *scene)
     }
     scene->inletLabel->VisibilityOff();
     renderer->AddViewProp(scene->inletLabel);
+
+    scene->axes->SetShaftTypeToCylinder();
+    scene->axes->SetCylinderRadius(0.03);
+    scene->axes->SetConeRadius(0.3);
+    for (vtkCaptionActor2D *caption : {scene->axes->GetXAxisCaptionActor2D(), scene->axes->GetYAxisCaptionActor2D(),
+                                       scene->axes->GetZAxisCaptionActor2D()}) {
+        vtkTextProperty *text = caption->GetCaptionTextProperty();
+        text->SetFontSize(13);
+        text->BoldOn();
+        text->ShadowOff();
+        text->ItalicOff();
+        caption->GetTextActor()->SetTextScaleModeToNone();
+    }
+    scene->axes->VisibilityOff();
+    renderer->AddViewProp(scene->axes);
     scene->scalarBar->VisibilityOff();
     renderer->AddViewProp(scene->scalarBar);
 }
@@ -498,6 +520,12 @@ void buildTunnelPreview(PreviewScene *scene, vtkPolyData *model)
     scene->arrowMapper->SetInputData(placed->GetOutput());
     scene->inletLabel->SetPosition(t[0] - 0.55 * arrowLength, yc, zc + 0.2 * arrowLength);
 
+    const double modelLength = std::max({modelBounds[1] - modelBounds[0], modelBounds[3] - modelBounds[2], modelBounds[5] - modelBounds[4]});
+    vtkNew<vtkTransform> corner; // vtkAxesActor ignores SetPosition; place it with a user transform
+    corner->Translate(t[0], t[2], t[4]);
+    scene->axes->SetUserTransform(corner);
+    scene->axes->SetTotalLength(0.8 * modelLength, 0.8 * modelLength, 0.8 * modelLength);
+
     const double view[6] = {t[0] - 1.1 * arrowLength, t[1], t[2], t[3], t[4], t[5]};
     std::copy(view, view + 6, scene->tunnelView);
 }
@@ -552,6 +580,32 @@ void applyTheme(PreviewScene *scene, bool dark)
     scene->arrowActor->GetProperty()->SetColor(accent);
     scene->inletActor->GetProperty()->SetColor(accent);
     scene->inletLabel->GetTextProperty()->SetColor(accent);
+    for (vtkCaptionActor2D *caption : {scene->axes->GetXAxisCaptionActor2D(), scene->axes->GetYAxisCaptionActor2D(),
+                                       scene->axes->GetZAxisCaptionActor2D()})
+        caption->GetCaptionTextProperty()->SetColor(text, text + 0.02, text + 0.05);
+}
+
+// The STL rotated about its centre: x, then y, then z about fixed axes, like OpenFoamCase writes it.
+vtkSmartPointer<vtkPolyData> rotatedSurface(vtkPolyData *surface, const QVector3D &degrees)
+{
+    if (!surface || degrees.isNull())
+        return surface;
+    double b[6];
+    surface->GetBounds(b);
+    const double c[3] = {0.5 * (b[0] + b[1]), 0.5 * (b[2] + b[3]), 0.5 * (b[4] + b[5])};
+    vtkNew<vtkTransform> transform; // pre-multiplied: T(c) * Rz * Ry * Rx * T(-c)
+    transform->Translate(c[0], c[1], c[2]);
+    transform->RotateZ(degrees.z());
+    transform->RotateY(degrees.y());
+    transform->RotateX(degrees.x());
+    transform->Translate(-c[0], -c[1], -c[2]);
+    vtkNew<vtkTransformPolyDataFilter> filter;
+    filter->SetInputData(surface);
+    filter->SetTransform(transform);
+    filter->Update();
+    auto rotated = vtkSmartPointer<vtkPolyData>::New();
+    rotated->ShallowCopy(filter->GetOutput());
+    return rotated;
 }
 
 void syncScene(PreviewScene *scene, const SceneState &state)
@@ -561,9 +615,14 @@ void syncScene(PreviewScene *scene, const SceneState &state)
         applyTheme(scene, state.darkTheme);
     }
     bool reframe = false;
-    if (scene->stlPath != state.stlPath) {
+    const bool newStl = scene->stlPath != state.stlPath;
+    if (newStl) {
         scene->stlPath = state.stlPath;
-        auto surface = readStl(state.stlPath);
+        scene->rawStl = readStl(state.stlPath);
+    }
+    if (newStl || scene->rotation != state.rotation) {
+        scene->rotation = state.rotation;
+        auto surface = rotatedSurface(scene->rawStl, state.rotation);
         scene->hasStl = surface != nullptr;
         scene->stlMapper->SetInputData(surface ? surface.Get() : vtkNew<vtkPolyData>().Get());
         if (surface)
@@ -591,7 +650,8 @@ void syncScene(PreviewScene *scene, const SceneState &state)
     scene->scalarBar->SetVisibility(preview && preview->colored);
     const bool showTunnel = scene->hasStl && !preview;
     for (vtkProp *prop : {static_cast<vtkProp *>(scene->outlineActor.Get()), static_cast<vtkProp *>(scene->inletActor.Get()),
-                          static_cast<vtkProp *>(scene->arrowActor.Get()), static_cast<vtkProp *>(scene->inletLabel.Get())})
+                          static_cast<vtkProp *>(scene->arrowActor.Get()), static_cast<vtkProp *>(scene->inletLabel.Get()),
+                          static_cast<vtkProp *>(scene->axes.Get())})
         prop->SetVisibility(showTunnel);
 
     if (reframe) {
@@ -614,7 +674,7 @@ QQuickVTKItem::vtkUserData VtkView::initializeVTK(vtkRenderWindow *renderWindow)
     auto scene = vtkSmartPointer<PreviewScene>::New();
     setupScene(scene);
     renderWindow->AddRenderer(scene->renderer);
-    syncScene(scene, {m_stlFile, m_preview, m_colorMap, m_darkTheme});
+    syncScene(scene, {m_stlFile, m_modelRotation, m_preview, m_colorMap, m_darkTheme});
     return scene;
 }
 #else
@@ -662,6 +722,15 @@ void VtkView::setPreviewRevision(int revision)
         resetCasePreview();
     else
         requestCasePreview(true);
+}
+
+void VtkView::setModelRotation(const QVector3D &rotation)
+{
+    if (m_modelRotation == rotation)
+        return;
+    m_modelRotation = rotation;
+    emit modelRotationChanged();
+    updateScene();
 }
 
 void VtkView::setColorMap(const QString &colorMap)
@@ -786,7 +855,7 @@ void VtkView::applyJobResult(int generation, std::shared_ptr<const CaseData> dat
 void VtkView::updateScene()
 {
 #ifdef WINDTUNNEL_HAS_VTK
-    dispatch_async([state = SceneState{m_stlFile, m_preview, m_colorMap, m_darkTheme}](vtkRenderWindow *, vtkUserData userData) {
+    dispatch_async([state = SceneState{m_stlFile, m_modelRotation, m_preview, m_colorMap, m_darkTheme}](vtkRenderWindow *, vtkUserData userData) {
         if (auto scene = PreviewScene::SafeDownCast(userData))
             syncScene(scene, state);
     });

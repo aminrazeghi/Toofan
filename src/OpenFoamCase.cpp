@@ -35,25 +35,37 @@ struct Bounds {
     double center(int i) const { return 0.5 * (min[i] + max[i]); }
 };
 
-bool readStlBounds(const QString &path, Bounds *bounds, QString *error)
+// Binary STL: 80-byte header, uint32 triangle count, 50 bytes per triangle
+// (normal and three vertices as little-endian floats, then 2 attribute bytes).
+quint32 binaryStlTriangles(const QByteArray &data)
+{
+    if (data.size() < 84) return 0;
+    const quint32 count = qFromLittleEndian<quint32>(data.constData() + 80);
+    return 84 + qint64(count) * 50 == data.size() ? count : 0;
+}
+
+bool readFile(const QString &path, QByteArray *data, QString *error)
 {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
         *error = QStringLiteral("Cannot read %1: %2").arg(path, file.errorString());
         return false;
     }
-    const QByteArray data = file.readAll();
-    // Binary STL: 80-byte header, uint32 triangle count, 50 bytes per triangle.
-    if (data.size() >= 84) {
-        const quint32 count = qFromLittleEndian<quint32>(data.constData() + 80);
-        if (84 + qint64(count) * 50 == data.size()) {
-            for (quint32 t = 0; t < count; ++t) {
-                const char *vertex = data.constData() + 84 + qint64(t) * 50 + 12;
-                for (int v = 0; v < 3; ++v, vertex += 12) {
-                    float xyz[3];
-                    for (int i = 0; i < 3; ++i) xyz[i] = qFromLittleEndian<float>(vertex + 4 * i);
-                    bounds->add(xyz[0], xyz[1], xyz[2]);
-                }
+    *data = file.readAll();
+    return true;
+}
+
+bool readStlBounds(const QString &path, Bounds *bounds, QString *error)
+{
+    QByteArray data;
+    if (!readFile(path, &data, error)) return false;
+    if (const quint32 count = binaryStlTriangles(data)) {
+        for (quint32 t = 0; t < count; ++t) {
+            const char *vertex = data.constData() + 84 + qint64(t) * 50 + 12;
+            for (int v = 0; v < 3; ++v, vertex += 12) {
+                float xyz[3];
+                for (int i = 0; i < 3; ++i) xyz[i] = qFromLittleEndian<float>(vertex + 4 * i);
+                bounds->add(xyz[0], xyz[1], xyz[2]);
             }
         }
     }
@@ -66,6 +78,84 @@ bool readStlBounds(const QString &path, Bounds *bounds, QString *error)
     }
     if (!bounds->valid() || std::max({bounds->extent(0), bounds->extent(1), bounds->extent(2)}) <= 0.0) {
         *error = QStringLiteral("The STL file contains no usable geometry.");
+        return false;
+    }
+    return true;
+}
+
+using Matrix3 = std::array<std::array<double, 3>, 3>;
+
+// R = Rz * Ry * Rx: rotate about x, then y, then z, all fixed axes. VtkView's preview uses the same order.
+Matrix3 rotationMatrix(const std::array<double, 3> &degrees)
+{
+    const double r = M_PI / 180.0;
+    const double cx = std::cos(degrees[0] * r), sx = std::sin(degrees[0] * r);
+    const double cy = std::cos(degrees[1] * r), sy = std::sin(degrees[1] * r);
+    const double cz = std::cos(degrees[2] * r), sz = std::sin(degrees[2] * r);
+    const Matrix3 rx{{{1, 0, 0}, {0, cx, -sx}, {0, sx, cx}}};
+    const Matrix3 ry{{{cy, 0, sy}, {0, 1, 0}, {-sy, 0, cy}}};
+    const Matrix3 rz{{{cz, -sz, 0}, {sz, cz, 0}, {0, 0, 1}}};
+    const auto multiply = [](const Matrix3 &a, const Matrix3 &b) {
+        Matrix3 m{};
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                for (int k = 0; k < 3; ++k) m[i][j] += a[i][k] * b[k][j];
+        return m;
+    };
+    return multiply(rz, multiply(ry, rx));
+}
+
+// Writes `source` rotated about the centre of `model` to `target`, keeping its format: binary stays
+// binary, and ASCII keeps everything but the normal and vertex coordinates (so named solids survive).
+bool writeRotatedStl(const QString &source, const QString &target, const std::array<double, 3> &degrees,
+                     const Bounds &model, QString *error)
+{
+    QByteArray data;
+    if (!readFile(source, &data, error)) return false;
+    const Matrix3 m = rotationMatrix(degrees);
+    const double centre[3] = {model.center(0), model.center(1), model.center(2)};
+    // Points rotate about the centre; normals are directions and only rotate.
+    const auto rotated = [&](const double p[3], bool point) {
+        std::array<double, 3> q{};
+        for (int i = 0; i < 3; ++i) {
+            for (int k = 0; k < 3; ++k) q[i] += m[i][k] * (p[k] - (point ? centre[k] : 0.0));
+            if (point) q[i] += centre[i];
+        }
+        return q;
+    };
+
+    if (const quint32 count = binaryStlTriangles(data)) {
+        for (quint32 t = 0; t < count; ++t) {
+            char *record = data.data() + 84 + qint64(t) * 50;
+            for (int v = 0; v < 4; ++v) { // normal, then three vertices
+                double p[3];
+                for (int i = 0; i < 3; ++i) p[i] = qFromLittleEndian<float>(record + 12 * v + 4 * i);
+                const auto q = rotated(p, v > 0);
+                for (int i = 0; i < 3; ++i) qToLittleEndian<float>(float(q[i]), record + 12 * v + 4 * i);
+            }
+        }
+    } else {
+        QList<QByteArray> lines = data.split('\n');
+        for (QByteArray &line : lines) {
+            const QByteArray trimmed = line.trimmed();
+            const bool vertex = trimmed.startsWith("vertex");
+            if (!vertex && !trimmed.startsWith("facet normal")) continue;
+            const QList<QByteArray> parts = trimmed.simplified().split(' ');
+            const int first = vertex ? 1 : 2;
+            if (parts.size() < first + 3) continue;
+            const double p[3] = {parts[first].toDouble(), parts[first + 1].toDouble(), parts[first + 2].toDouble()};
+            const auto q = rotated(p, vertex);
+            const QByteArray indent = line.left(line.indexOf(trimmed.at(0)));
+            line = indent + (vertex ? "vertex " : "facet normal ") + QByteArray::number(q[0], 'g', 9) + ' '
+                   + QByteArray::number(q[1], 'g', 9) + ' ' + QByteArray::number(q[2], 'g', 9)
+                   + (line.endsWith('\r') ? "\r" : "");
+        }
+        data = lines.join('\n');
+    }
+
+    QFile file(target);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(data) != data.size()) {
+        *error = QStringLiteral("Cannot write %1: %2").arg(target, file.errorString());
         return false;
     }
     return true;
@@ -323,16 +413,22 @@ bool OpenFoamCase::prepare(const CaseOptions &options, QString *message)
         *error = QStringLiteral("No wind tunnel template for %1 yet; lower the inlet speed below Mach 1 (pimpleFoam or rhoPimpleFoam).").arg(solver);
         return false;
     }
-    Bounds model;
-    if (!readStlBounds(stl.absoluteFilePath(), &model, error)) return false;
+    Bounds original;
+    if (!readStlBounds(stl.absoluteFilePath(), &original, error)) return false;
 
     const QDir root(options.casePath);
     if (!resetCaseDirectory(root, error)) return false;
     const QString surfacePath = root.filePath(QStringLiteral("constant/triSurface/model.stl"));
-    if (!QFile::copy(stl.absoluteFilePath(), surfacePath)) {
+    const bool rotated = options.rotation != std::array<double, 3>{0.0, 0.0, 0.0};
+    if (rotated) {
+        if (!writeRotatedStl(stl.absoluteFilePath(), surfacePath, options.rotation, original, error)) return false;
+    } else if (!QFile::copy(stl.absoluteFilePath(), surfacePath)) {
         *error = QStringLiteral("Cannot copy the STL into the case directory.");
         return false;
     }
+    // The tunnel is sized around the model as it will be meshed.
+    Bounds model;
+    if (!readStlBounds(surfacePath, &model, error)) return false;
     const json data = buildTemplateData(options, solver, model);
     if (!renderTemplates(data, solver, root, error)) return false;
 

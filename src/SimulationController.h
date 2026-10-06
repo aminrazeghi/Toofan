@@ -9,6 +9,7 @@
 #include <QSet>
 #include <QTimer>
 #include <QVariantList>
+#include <QVector3D>
 #include <cmath>
 
 class SimulationController : public QObject {
@@ -16,6 +17,8 @@ class SimulationController : public QObject {
     Q_PROPERTY(QString stlPath READ stlPath WRITE setStlPath NOTIFY stlPathChanged)
     Q_PROPERTY(QString caseRoot READ caseRoot WRITE setCaseRoot NOTIFY caseRootChanged)
     Q_PROPERTY(CaseSettings *settings READ settings CONSTANT)
+    // Model orientation in degrees about x, then y, then z; each in (-180, 180].
+    Q_PROPERTY(QVector3D modelRotation READ modelRotation NOTIFY modelRotationChanged)
     Q_PROPERTY(double speed READ speed WRITE setSpeed NOTIFY speedChanged)
     Q_PROPERTY(QString meshQuality READ meshQuality WRITE setMeshQuality NOTIFY meshQualityChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
@@ -41,6 +44,10 @@ public:
     QString stlPath() const { return m_stlPath; }
     QString caseRoot() const { return m_caseRoot; }
     CaseSettings *settings() { return &m_settings; }
+    QVector3D modelRotation() const { return m_modelRotation; }
+    // axis: 0 = x, 1 = y, 2 = z.
+    Q_INVOKABLE void rotateModel(int axis, double degrees);
+    Q_INVOKABLE void resetModelRotation();
     double speed() const { return m_speed; }
     QString meshQuality() const { return m_meshQuality; }
     QString status() const { return m_status; }
@@ -63,7 +70,7 @@ public:
     Q_INVOKABLE void startSimulation();
     Q_INVOKABLE void stopSimulation();
 signals:
-    void stlPathChanged(); void caseRootChanged(); void speedChanged(); void meshQualityChanged();
+    void stlPathChanged(); void modelRotationChanged(); void caseRootChanged(); void speedChanged(); void meshQualityChanged();
     void statusChanged(); void solverChanged(); void logChanged(); void monitorsChanged();
     void casePathChanged(); void previewRevisionChanged();
 private:
@@ -83,6 +90,7 @@ private:
     QString m_stlPath;
     QString m_caseRoot;
     CaseSettings m_settings;
+    QVector3D m_modelRotation;
     double m_speed = 20.0;
     QString m_meshQuality = QStringLiteral("Coarse");
     QString m_status = QStringLiteral("Ready");

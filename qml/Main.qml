@@ -130,7 +130,9 @@ ApplicationWindow {
                         NumberAnimation { duration: setupPanel.collapsed ? 200 : 120 }
                     }
                 }
+                readonly property vector3d r: simulation.modelRotation
                 text: "RUN SETUP  ·  " + (simulation.stlPath ? simulation.stlPath.split("/").pop() : "no model")
+                      + (r.x || r.y || r.z ? "  ·  rot " + Math.round(r.x) + "/" + Math.round(r.y) + "/" + Math.round(r.z) + "°" : "")
                       + "  ·  " + Math.round(simulation.speed) + " m/s  ·  " + simulation.meshQuality
                 color: muted; font.pixelSize: 11; font.bold: true; font.letterSpacing: 1.2
             }
@@ -171,6 +173,14 @@ ApplicationWindow {
                     MouseArea { anchors.fill: parent; onClicked: stlDialog.open() }
                 }
                 Button { text: "Browse files"; Layout.fillWidth: true; onClicked: stlDialog.open() }
+                OrientationControl {
+                    Layout.fillWidth: true
+                    enabled: simulation.stlPath.length > 0
+                    opacity: enabled ? 1 : 0.5
+                    angles: simulation.modelRotation
+                    onRotate: (axis, degrees) => simulation.rotateModel(axis, degrees)
+                    onReset: simulation.resetModelRotation()
+                }
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.divider }
                 Label { text: "Inlet speed"; color: Theme.textStrong; font.pixelSize: 14; font.bold: true }
                 RowLayout {
@@ -221,6 +231,7 @@ ApplicationWindow {
                 stlFile: simulation.stlPath
                 casePath: simulation.casePath
                 previewRevision: simulation.previewRevision
+                modelRotation: simulation.modelRotation
                 colorMap: appSettings.colorMap
                 darkTheme: Theme.dark
             }

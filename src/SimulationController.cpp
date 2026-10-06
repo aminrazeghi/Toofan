@@ -62,7 +62,24 @@ void SimulationController::setStlPath(const QString &path)
     // Accept file:// URLs (e.g. from QML FileDialog) as well as plain paths.
     const QUrl url(path);
     const QString localPath = url.isLocalFile() ? url.toLocalFile() : path;
-    if (m_stlPath != localPath) { m_stlPath = localPath; emit stlPathChanged(); }
+    if (m_stlPath != localPath) { m_stlPath = localPath; emit stlPathChanged(); resetModelRotation(); }
+}
+
+void SimulationController::rotateModel(int axis, double degrees)
+{
+    if (axis < 0 || axis > 2) return;
+    double angle = std::fmod(m_modelRotation[axis] + degrees, 360.0);
+    if (angle > 180.0) angle -= 360.0;
+    if (angle <= -180.0) angle += 360.0;
+    m_modelRotation[axis] = float(angle);
+    emit modelRotationChanged();
+}
+
+void SimulationController::resetModelRotation()
+{
+    if (m_modelRotation.isNull()) return;
+    m_modelRotation = QVector3D();
+    emit modelRotationChanged();
 }
 void SimulationController::setCaseRoot(const QString &path)
 {
@@ -97,6 +114,7 @@ void SimulationController::startSimulation()
     QString message;
     CaseOptions options{m_stlPath, m_casePath, m_meshQuality, m_speed};
     m_settings.apply(&options);
+    options.rotation = {m_modelRotation.x(), m_modelRotation.y(), m_modelRotation.z()};
     if (!OpenFoamCase::prepare(options, &message)) {
         m_status = QStringLiteral("Needs attention"); emit statusChanged(); appendLog(message); return;
     }

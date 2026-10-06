@@ -9,6 +9,7 @@ class vtkRenderWindow;
 
 #include <QString>
 #include <QVariantList>
+#include <QVector3D>
 #include <QtQml/qqmlregistration.h>
 #include <memory>
 
@@ -32,6 +33,8 @@ class VtkView : public QQuickItem
     Q_PROPERTY(QString renderMode READ renderMode WRITE setRenderMode NOTIFY renderModeChanged)
     // Field used for coloring: U, p, k, omega, and for compressible cases T, rho, Ma.
     Q_PROPERTY(QString field READ field WRITE setField NOTIFY fieldChanged)
+    // Orientation of the imported STL, degrees about x, then y, then z (as the case will be meshed).
+    Q_PROPERTY(QVector3D modelRotation READ modelRotation WRITE setModelRotation NOTIFY modelRotationChanged)
     // Contour palette, one of colorMaps()[i].value.
     Q_PROPERTY(QString colorMap READ colorMap WRITE setColorMap NOTIFY colorMapChanged)
     // Background and annotation colors follow the app theme.
@@ -54,6 +57,8 @@ public:
     void setRenderMode(const QString &mode);
     QString field() const { return m_field; }
     void setField(const QString &field);
+    QVector3D modelRotation() const { return m_modelRotation; }
+    void setModelRotation(const QVector3D &rotation);
     QString colorMap() const { return m_colorMap; }
     void setColorMap(const QString &colorMap);
     bool darkTheme() const { return m_darkTheme; }
@@ -76,6 +81,7 @@ signals:
     void previewRevisionChanged();
     void renderModeChanged();
     void fieldChanged();
+    void modelRotationChanged();
     void colorMapChanged();
     void darkThemeChanged();
     void previewInfoChanged();
@@ -95,6 +101,7 @@ private:
     int m_previewRevision = 0;
     QString m_renderMode = QStringLiteral("slice");
     QString m_field = QStringLiteral("U");
+    QVector3D m_modelRotation;
     QString m_colorMap = QStringLiteral("viridis");
     bool m_darkTheme = true;
     QString m_previewInfo;
