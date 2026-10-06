@@ -1,16 +1,16 @@
-{% if turbulence.usesOmega %}
+{% if turbulence.usesEpsilon %}
 {% include "banner" %}
 FoamFile
 {
     version     2.0;
     format      ascii;
     class       volScalarField;
-    object      omega;
+    object      epsilon;
 }
 
-dimensions      [0 0 -1 0 0 0 0];
+dimensions      [0 2 -3 0 0 0 0];
 
-internalField   uniform {{ flow.omega }};
+internalField   uniform {{ flow.epsilon }};
 
 boundaryField
 {
@@ -31,7 +31,7 @@ boundaryField
     }
     {{ surface.group }}
     {
-        type            omegaWallFunction;
+        type            epsilonWallFunction;
         value           $internalField;
     }
 }

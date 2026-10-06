@@ -19,6 +19,8 @@ gradSchemes
     grad(U)         $limited;
     grad(k)         $limited;
     grad(omega)     $limited;
+    grad(epsilon)   $limited;
+    grad(nuTilda)   $limited;
 }
 
 divSchemes
@@ -29,9 +31,11 @@ divSchemes
     div(phi,e)      $energy;
     div(phi,K)      $energy;
     div(phi,Ekp)    $energy;
-    turbulence      Gauss linearUpwind limited;
+    turbulence      Gauss upwind;   // bounded first order: robust for k, epsilon, omega, nuTilda
     div(phi,k)      $turbulence;
     div(phi,omega)  $turbulence;
+    div(phi,epsilon) $turbulence;
+    div(phi,nuTilda) $turbulence;
     div(phiv,p)     Gauss upwind;
     div(phid,p)     Gauss upwind;   // transonic pressure equation
     div((phi|interpolate(rho)),p) Gauss upwind;

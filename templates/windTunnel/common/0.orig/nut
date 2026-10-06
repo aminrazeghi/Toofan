@@ -1,3 +1,4 @@
+{% if not turbulence.laminar %}
 {% include "banner" %}
 FoamFile
 {
@@ -20,9 +21,10 @@ boundaryField
     }
     {{ surface.group }}
     {
-        type            nutkWallFunction;
+        type            {{ turbulence.nutWallFunction }};
         value           uniform 0;
     }
 }
 
 // ************************************************************************* //
+{% endif %}

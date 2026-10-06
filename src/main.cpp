@@ -10,6 +10,7 @@ int main(int argc, char *argv[])
     VtkView::setGraphicsApi();
     QGuiApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("Digital Wind Tunnel"));
+    app.setOrganizationName(QStringLiteral("Toofan")); // settings location
     QQuickStyle::setStyle(QStringLiteral("Basic"));
     SimulationController controller;
     QQmlApplicationEngine engine;

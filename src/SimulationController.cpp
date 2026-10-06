@@ -18,6 +18,7 @@ SimulationController::SimulationController(QObject *parent) : QObject(parent), m
     }
     // Merge stderr into stdout so each step's log file keeps the original interleaving.
     m_process.setProcessChannelMode(QProcess::MergedChannels);
+    connect(&m_settings, &CaseSettings::changed, this, &SimulationController::updateSolver);
     m_monitorTimer.setSingleShot(true);
     m_monitorTimer.setInterval(250);
     connect(&m_monitorTimer, &QTimer::timeout, this, &SimulationController::monitorsChanged);
@@ -69,7 +70,12 @@ void SimulationController::setCaseRoot(const QString &path)
     const QString localPath = url.isLocalFile() ? url.toLocalFile() : path;
     if (m_caseRoot != localPath) { m_caseRoot = localPath; emit caseRootChanged(); }
 }
-void SimulationController::setSpeed(double value) { if (!qFuzzyCompare(m_speed, value)) { m_speed = value; m_solver = OpenFoamCase::solverForSpeed(value); emit speedChanged(); emit solverChanged(); } }
+void SimulationController::setSpeed(double value) { if (!qFuzzyCompare(m_speed, value)) { m_speed = value; emit speedChanged(); updateSolver(); } }
+void SimulationController::updateSolver()
+{
+    const QString solver = OpenFoamCase::solverForSpeed(m_speed, m_settings.temperature);
+    if (solver != m_solver) { m_solver = solver; emit solverChanged(); }
+}
 void SimulationController::setMeshQuality(const QString &value) { if (m_meshQuality != value) { m_meshQuality = value; emit meshQualityChanged(); } }
 
 void SimulationController::appendLog(const QString &line)
@@ -83,13 +89,15 @@ void SimulationController::appendLog(const QString &line)
 void SimulationController::startSimulation()
 {
     if (m_process.state() != QProcess::NotRunning) return;
-    m_solver = OpenFoamCase::solverForSpeed(m_speed); emit solverChanged();
+    updateSolver();
     m_casePath = QDir(m_caseRoot).filePath(QFileInfo(m_stlPath).completeBaseName());
     emit casePathChanged();
     setPreviewRevision(0);
     m_previewTime = 0.0;
     QString message;
-    if (!OpenFoamCase::prepare({m_stlPath, m_casePath, m_meshQuality, m_speed}, &message)) {
+    CaseOptions options{m_stlPath, m_casePath, m_meshQuality, m_speed};
+    m_settings.apply(&options);
+    if (!OpenFoamCase::prepare(options, &message)) {
         m_status = QStringLiteral("Needs attention"); emit statusChanged(); appendLog(message); return;
     }
     // Fields are generated in 0.orig and copied after meshing, as snappyHexMesh changes the patches.
@@ -164,13 +172,37 @@ void SimulationController::parseOutput(const QByteArray &output)
     }
 }
 
+namespace {
+// Keeps a whole run plottable: past maxPoints, halve the resolution instead of dropping the start.
+void appendDecimated(QList<QPointF> &history, const QPointF &point)
+{
+    constexpr qsizetype maxPoints = 4000;
+    history.append(point);
+    if (history.size() <= maxPoints) return;
+    QList<QPointF> decimated;
+    decimated.reserve(history.size() / 2 + 1);
+    for (qsizetype i = 0; i < history.size(); i += 2) decimated.append(history[i]);
+    history = decimated;
+}
+
+// {name, times, values} as consumed by LinePlot.qml.
+QVariantMap toSeries(const QString &name, const QList<QPointF> &history)
+{
+    QList<double> times, values;
+    times.reserve(history.size()); values.reserve(history.size());
+    for (const QPointF &point : history) { times.append(point.x()); values.append(point.y()); }
+    return {{QStringLiteral("name"), name},
+            {QStringLiteral("times"), QVariant::fromValue(times)},
+            {QStringLiteral("values"), QVariant::fromValue(values)}};
+}
+}
+
 void SimulationController::parseLine(const QString &line)
 {
     static const QRegularExpression cellsRe(QStringLiteral("cells:(\\d+)"));
     static const QRegularExpression timeRe(QStringLiteral("^Time = (\\S+)\\s*$"));
     static const QRegularExpression residualRe(QStringLiteral("Solving for (\\w+), Initial residual = ([^,]+),"));
     static const QRegularExpression coefficientRe(QStringLiteral("^\\s*(Cd|Cl):\\s+(\\S+)"));
-    constexpr qsizetype maxPoints = 4000;
 
     const QString &step = m_steps[m_step].name;
     if (step == QStringLiteral("snappyHexMesh")) {
@@ -183,6 +215,7 @@ void SimulationController::parseLine(const QString &line)
     if (const auto match = timeRe.match(line); match.hasMatch()) {
         m_time = match.captured(1).toDouble();
         m_residualsThisStep.clear();
+        scheduleMonitorUpdate();
         return;
     }
     if (const auto match = residualRe.match(line); match.hasMatch()) {
@@ -192,14 +225,7 @@ void SimulationController::parseLine(const QString &line)
         const double value = match.captured(2).toDouble();
         if (value <= 0.0 || m_residualsThisStep.contains(field)) return;
         m_residualsThisStep.insert(field);
-        QList<QPointF> &history = m_residualHistory[field];
-        history.append({m_time, value});
-        if (history.size() > maxPoints) { // halve the resolution of long runs instead of dropping their start
-            QList<QPointF> decimated;
-            decimated.reserve(history.size() / 2 + 1);
-            for (qsizetype i = 0; i < history.size(); i += 2) decimated.append(history[i]);
-            history = decimated;
-        }
+        appendDecimated(m_residualHistory[field], {m_time, value});
         scheduleMonitorUpdate();
         return;
     }
@@ -207,7 +233,9 @@ void SimulationController::parseLine(const QString &line)
         bool ok = false;
         const double value = match.captured(2).toDouble(&ok);
         if (!ok) return;
-        (match.captured(1) == QStringLiteral("Cd") ? m_dragCoefficient : m_liftCoefficient) = value;
+        const bool drag = match.captured(1) == QStringLiteral("Cd");
+        (drag ? m_dragCoefficient : m_liftCoefficient) = value;
+        appendDecimated(drag ? m_dragHistory : m_liftHistory, {m_time, value});
         scheduleMonitorUpdate();
     }
 }
@@ -215,15 +243,19 @@ void SimulationController::parseLine(const QString &line)
 QVariantList SimulationController::residuals() const
 {
     QVariantList series;
-    for (auto it = m_residualHistory.cbegin(); it != m_residualHistory.cend(); ++it) {
-        QList<double> times, values;
-        times.reserve(it.value().size()); values.reserve(it.value().size());
-        for (const QPointF &point : it.value()) { times.append(point.x()); values.append(point.y()); }
-        series.append(QVariantMap{{QStringLiteral("name"), it.key()},
-                                  {QStringLiteral("times"), QVariant::fromValue(times)},
-                                  {QStringLiteral("values"), QVariant::fromValue(values)}});
-    }
+    for (auto it = m_residualHistory.cbegin(); it != m_residualHistory.cend(); ++it)
+        series.append(toSeries(it.key(), it.value()));
     return series;
+}
+
+QVariantList SimulationController::dragHistory() const
+{
+    return m_dragHistory.isEmpty() ? QVariantList() : QVariantList{toSeries(QStringLiteral("Cd"), m_dragHistory)};
+}
+
+QVariantList SimulationController::liftHistory() const
+{
+    return m_liftHistory.isEmpty() ? QVariantList() : QVariantList{toSeries(QStringLiteral("Cl"), m_liftHistory)};
 }
 
 void SimulationController::resetMonitors()
@@ -231,6 +263,8 @@ void SimulationController::resetMonitors()
     m_time = 0.0;
     m_residualsThisStep.clear();
     m_residualHistory.clear();
+    m_dragHistory.clear();
+    m_liftHistory.clear();
     m_dragCoefficient = m_liftCoefficient = std::nan("");
     m_cellCount = 0;
     m_monitorTimer.stop();

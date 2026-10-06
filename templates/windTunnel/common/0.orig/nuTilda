@@ -1,16 +1,16 @@
-{% if turbulence.usesOmega %}
+{% if turbulence.usesNuTilda %}
 {% include "banner" %}
 FoamFile
 {
     version     2.0;
     format      ascii;
     class       volScalarField;
-    object      omega;
+    object      nuTilda;
 }
 
-dimensions      [0 0 -1 0 0 0 0];
+dimensions      [0 2 -1 0 0 0 0];
 
-internalField   uniform {{ flow.omega }};
+internalField   uniform {{ flow.nuTilda }};
 
 boundaryField
 {
@@ -31,8 +31,8 @@ boundaryField
     }
     {{ surface.group }}
     {
-        type            omegaWallFunction;
-        value           $internalField;
+        type            fixedValue;
+        value           uniform 0;
     }
 }
 

@@ -23,7 +23,7 @@ solvers
         relTol          0;
     }
 
-    "(rho|U|k|omega|e)"
+    "(rho|U|k|omega|epsilon|nuTilda|e)"
     {
         solver          PBiCGStab;
         preconditioner  DILU;
@@ -31,7 +31,7 @@ solvers
         relTol          0.1;
     }
 
-    "(rho|U|k|omega|e)Final"
+    "(rho|U|k|omega|epsilon|nuTilda|e)Final"
     {
         $U;
         relTol          0;

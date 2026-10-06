@@ -19,7 +19,8 @@ using json = nlohmann::json;
 
 const QString kTemplateRoot = QStringLiteral(":/templates/windTunnel");
 const QString kCaseMarker = QStringLiteral(".windtunnel-case");
-constexpr double kSoundSpeed = 343.0; // provisional standard-air estimate (293 K)
+constexpr double kMolWeight = 28.96;  // air, kg/kmol
+constexpr double kGamma = 1.4;
 
 struct Bounds {
     std::array<double, 3> min{std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
@@ -83,9 +84,9 @@ json buildTemplateData(const CaseOptions &options, const QString &solver, const 
     const int surfaceLevelMin = fine ? 4 : 3;
     const int surfaceLevelMax = surfaceLevelMin + 1;
 
-    // Tunnel box: 3 model lengths upstream, 8 downstream, 2.5 on each side.
-    std::array<double, 3> lo{model.min[0] - 3.0 * length, model.min[1] - 2.5 * length, model.min[2] - 2.5 * length};
-    std::array<double, 3> hi{model.max[0] + 8.0 * length, model.max[1] + 2.5 * length, model.max[2] + 2.5 * length};
+    const std::array<double, 6> tunnel = OpenFoamCase::tunnelBounds({model.min[0], model.max[0], model.min[1], model.max[1], model.min[2], model.max[2]});
+    const std::array<double, 3> lo{tunnel[0], tunnel[2], tunnel[4]};
+    const std::array<double, 3> hi{tunnel[1], tunnel[3], tunnel[5]};
     std::array<int, 3> cells{};
     std::array<double, 3> location{};
     for (int i = 0; i < 3; ++i) {
@@ -95,16 +96,30 @@ json buildTemplateData(const CaseOptions &options, const QString &solver, const 
     }
 
     const double speed = std::max(options.inletSpeed, 1e-3);
-    const double mach = speed / kSoundSpeed;
-    const double intensity = 0.01;
-    const double k = 1.5 * std::pow(speed * intensity, 2);
-    const double omega = std::sqrt(k) / (std::pow(0.09, 0.25) * 0.1 * length);
-    const double pressure = 101325.0, temperature = 293.15, molWeight = 28.96;
-    const double gasConstant = 8314.46 / molWeight;
+    const double pressure = options.pressure, temperature = options.temperature;
+    const double gasConstant = 8314.46 / kMolWeight;
+    const double rho = compressible ? pressure / (gasConstant * temperature) : options.density;
+    const double nu = compressible ? options.dynamicViscosity / rho : options.kinematicViscosity;
+    const double mach = speed / OpenFoamCase::speedOfSound(temperature);
+
+    // Inlet turbulence from intensity I and length scale l (standard estimates).
+    const double cmu = 0.09;
+    const double l = std::max(options.turbulenceLengthScale, 1e-6) * length;
+    const double k = 1.5 * std::pow(speed * options.turbulenceIntensity, 2);
+    const double omega = std::sqrt(k) / (std::pow(cmu, 0.25) * l);
+    const double epsilon = std::pow(cmu, 0.75) * std::pow(k, 1.5) / l;
+    const double nuTilda = 3.0 * nu; // free-stream Spalart-Allmaras value
+
+    const QString &turbulenceModel = options.turbulenceModel;
+    const bool laminar = turbulenceModel == QStringLiteral("laminar");
+    const bool spalart = turbulenceModel == QStringLiteral("SpalartAllmaras");
+    const bool usesOmega = turbulenceModel == QStringLiteral("kOmegaSST");
+    const bool usesEpsilon = turbulenceModel == QStringLiteral("kEpsilon") || turbulenceModel == QStringLiteral("realizableKE");
 
     const double minCell = baseCell / std::pow(2.0, surfaceLevelMax);
     const double tunnelLength = hi[0] - lo[0];
-    const double endTime = 2.0 * tunnelLength / speed; // two flow-through times
+    const double endTime = std::max(options.flowThroughs, 0.01) * tunnelLength / speed;
+    const double maxCo = options.maxCourant > 0 ? options.maxCourant : (compressible ? 1.0 : 2.0);
 
     const double lRef = model.extent(0) > 0 ? model.extent(0) : length;
     const double frontalArea = model.extent(1) * model.extent(2);
@@ -112,13 +127,20 @@ json buildTemplateData(const CaseOptions &options, const QString &solver, const 
     json data;
     data["solver"] = solver.toStdString();
     data["compressible"] = compressible;
+    // Each field template checks the flags it needs; templates that render empty are not written.
+    data["turbulence"] = {
+        {"model", turbulenceModel.toStdString()}, {"laminar", laminar},
+        {"usesK", usesOmega || usesEpsilon}, {"usesOmega", usesOmega}, {"usesEpsilon", usesEpsilon}, {"usesNuTilda", spalart},
+        {"nutWallFunction", spalart ? "nutUSpaldingWallFunction" : "nutkWallFunction"},
+    };
     data["surface"] = {{"file", "model.stl"}, {"name", "model"}, {"group", "modelGroup"}, {"eMesh", "model.eMesh"}};
     data["flow"] = {
         {"U", vec(speed, 0, 0)}, {"Umag", round6(speed)}, {"mach", round6(mach)}, {"transonic", mach >= 0.7},
-        {"k", round6(k)}, {"omega", round6(omega)},
-        {"nu", 1.5e-5},
-        {"rhoInf", compressible ? round6(pressure / (gasConstant * temperature)) : 1.225},
-        {"p", pressure}, {"T", temperature}, {"mu", 1.81e-5}, {"Cp", 1005.0}, {"Pr", 0.71}, {"molWeight", molWeight},
+        {"k", round6(k)}, {"omega", round6(omega)}, {"epsilon", round6(epsilon)}, {"nuTilda", round6(nuTilda)},
+        {"nu", round6(nu)},
+        {"rhoInf", round6(rho)},
+        {"p", round6(pressure)}, {"T", round6(temperature)}, {"mu", round6(options.dynamicViscosity)},
+        {"Cp", 1005.0}, {"Pr", 0.71}, {"molWeight", kMolWeight},
     };
     data["domain"] = {
         {"xMin", round6(lo[0])}, {"xMax", round6(hi[0])},
@@ -136,13 +158,13 @@ json buildTemplateData(const CaseOptions &options, const QString &solver, const 
         }},
         {"locationInMesh", vec(location[0], location[1], location[2])},
         {"maxGlobalCells", fine ? 8000000 : 2000000}, {"maxLocalCells", fine ? 8000000 : 2000000},
-        {"addLayers", "true"}, {"nSurfaceLayers", 3},
+        {"addLayers", options.surfaceLayers > 0 ? "true" : "false"}, {"nSurfaceLayers", std::max(options.surfaceLayers, 1)},
     };
     data["time"] = {
         {"endTime", round6(endTime)},
         {"deltaT", round6(0.2 * minCell / speed)},
-        {"writeInterval", round6(endTime / 60.0)},
-        {"maxCo", compressible ? 1.0 : 2.0},
+        {"writeInterval", round6(endTime / std::max(options.writeCount, 1))},
+        {"maxCo", round6(maxCo)},
     };
     data["forces"] = {
         {"CofR", vec(model.center(0), model.center(1), model.center(2))},
@@ -204,6 +226,9 @@ bool renderTemplates(const json &data, const QString &solver, const QDir &root, 
             current = it.value();
             if (!readResource(current, &contents, error)) return false;
             const std::string rendered = env.render(contents, data);
+            // A template wrapped in a false condition (e.g. omega for k-epsilon) is not part of this case.
+            if (rendered.find_first_not_of(" \t\r\n") == std::string::npos)
+                continue;
             const QString target = root.filePath(it.key());
             QDir().mkpath(QFileInfo(target).path());
             QFile file(target);
@@ -257,12 +282,26 @@ bool resetCaseDirectory(const QDir &root, QString *error)
 }
 }
 
-QString OpenFoamCase::solverForSpeed(double speed)
+double OpenFoamCase::speedOfSound(double temperature)
 {
-    const double mach = speed / kSoundSpeed;
+    return std::sqrt(kGamma * 8314.46 / kMolWeight * std::max(temperature, 1.0));
+}
+
+QString OpenFoamCase::solverForSpeed(double speed, double temperature)
+{
+    const double mach = speed / speedOfSound(temperature);
     if (mach < 0.3) return QStringLiteral("pimpleFoam");
     if (mach < 1.0) return QStringLiteral("rhoPimpleFoam");
     return QStringLiteral("sonicFoam");
+}
+
+std::array<double, 6> OpenFoamCase::tunnelBounds(const std::array<double, 6> &model)
+{
+    // 3 model lengths upstream, 8 downstream, 2.5 on each side.
+    const double length = std::max({model[1] - model[0], model[3] - model[2], model[5] - model[4]});
+    return {model[0] - 3.0 * length, model[1] + 8.0 * length,
+            model[2] - 2.5 * length, model[3] + 2.5 * length,
+            model[4] - 2.5 * length, model[5] + 2.5 * length};
 }
 
 QString OpenFoamCase::defaultCaseRoot()
@@ -279,7 +318,7 @@ bool OpenFoamCase::prepare(const CaseOptions &options, QString *message)
         *error = QStringLiteral("Choose a readable STL file first.");
         return false;
     }
-    const QString solver = solverForSpeed(options.inletSpeed);
+    const QString solver = solverForSpeed(options.inletSpeed, options.temperature);
     if (!QFileInfo(kTemplateRoot + QLatin1Char('/') + solver).isDir()) {
         *error = QStringLiteral("No wind tunnel template for %1 yet; lower the inlet speed below Mach 1 (pimpleFoam or rhoPimpleFoam).").arg(solver);
         return false;

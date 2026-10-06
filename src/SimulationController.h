@@ -1,4 +1,5 @@
 #pragma once
+#include "CaseSettings.h"
 #include <QFile>
 #include <QFileSystemWatcher>
 #include <QMap>
@@ -14,9 +15,12 @@ class SimulationController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString stlPath READ stlPath WRITE setStlPath NOTIFY stlPathChanged)
     Q_PROPERTY(QString caseRoot READ caseRoot WRITE setCaseRoot NOTIFY caseRootChanged)
+    Q_PROPERTY(CaseSettings *settings READ settings CONSTANT)
     Q_PROPERTY(double speed READ speed WRITE setSpeed NOTIFY speedChanged)
     Q_PROPERTY(QString meshQuality READ meshQuality WRITE setMeshQuality NOTIFY meshQualityChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
+    // A workflow is in progress (including while it is being stopped).
+    Q_PROPERTY(bool running READ running NOTIFY statusChanged)
     Q_PROPERTY(QString solver READ solver NOTIFY solverChanged)
     Q_PROPERTY(QString log READ log NOTIFY logChanged)
     Q_PROPERTY(QString casePath READ casePath NOTIFY casePathChanged)
@@ -26,15 +30,21 @@ class SimulationController : public QObject {
     Q_PROPERTY(double dragCoefficient READ dragCoefficient NOTIFY monitorsChanged)
     Q_PROPERTY(double liftCoefficient READ liftCoefficient NOTIFY monitorsChanged)
     Q_PROPERTY(int cellCount READ cellCount NOTIFY monitorsChanged)
+    Q_PROPERTY(double simulatedTime READ simulatedTime NOTIFY monitorsChanged)
     // [{name, times: [...], values: [...]}] of initial residuals per field and time step.
     Q_PROPERTY(QVariantList residuals READ residuals NOTIFY monitorsChanged)
+    // Same shape, one series each: force coefficient history per time step.
+    Q_PROPERTY(QVariantList dragHistory READ dragHistory NOTIFY monitorsChanged)
+    Q_PROPERTY(QVariantList liftHistory READ liftHistory NOTIFY monitorsChanged)
 public:
     explicit SimulationController(QObject *parent = nullptr);
     QString stlPath() const { return m_stlPath; }
     QString caseRoot() const { return m_caseRoot; }
+    CaseSettings *settings() { return &m_settings; }
     double speed() const { return m_speed; }
     QString meshQuality() const { return m_meshQuality; }
     QString status() const { return m_status; }
+    bool running() const { return m_status.startsWith(QStringLiteral("Running ")) || m_status == QStringLiteral("Stopping"); }
     QString solver() const { return m_solver; }
     QString log() const { return m_log; }
     QString casePath() const { return m_casePath; }
@@ -42,7 +52,10 @@ public:
     double dragCoefficient() const { return m_dragCoefficient; }
     double liftCoefficient() const { return m_liftCoefficient; }
     int cellCount() const { return m_cellCount; }
+    double simulatedTime() const { return m_time; }
     QVariantList residuals() const;
+    QVariantList dragHistory() const;
+    QVariantList liftHistory() const;
     void setStlPath(const QString &path);
     void setCaseRoot(const QString &path);
     void setSpeed(double value);
@@ -55,6 +68,7 @@ signals:
     void casePathChanged(); void previewRevisionChanged();
 private:
     void appendLog(const QString &line);
+    void updateSolver();
     void runNextStep();
     void finishStep(const QString &summary);
     void writeStepLog(const QByteArray &data);
@@ -68,6 +82,7 @@ private:
     void publishLatestTime();
     QString m_stlPath;
     QString m_caseRoot;
+    CaseSettings m_settings;
     double m_speed = 20.0;
     QString m_meshQuality = QStringLiteral("Coarse");
     QString m_status = QStringLiteral("Ready");
@@ -85,6 +100,7 @@ private:
     double m_time = 0.0;
     QSet<QString> m_residualsThisStep;
     QMap<QString, QList<QPointF>> m_residualHistory;
+    QList<QPointF> m_dragHistory, m_liftHistory;
     double m_dragCoefficient = std::nan("");
     double m_liftCoefficient = std::nan("");
     int m_cellCount = 0;

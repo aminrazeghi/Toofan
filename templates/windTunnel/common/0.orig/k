@@ -1,3 +1,4 @@
+{% if turbulence.usesK %}
 {% include "banner" %}
 FoamFile
 {
@@ -36,3 +37,4 @@ boundaryField
 }
 
 // ************************************************************************* //
+{% endif %}

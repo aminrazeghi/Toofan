@@ -54,6 +54,16 @@ functions
         Aref            {{ forces.Aref }};
     }
 
+{% if compressible %}
+    MachNo
+    {
+        type            MachNo;
+        libs            (fieldFunctionObjects);
+        executeControl  writeTime;
+        writeControl    writeTime;
+    }
+
+{% endif %}
     solverInfo
     {
         type            solverInfo;

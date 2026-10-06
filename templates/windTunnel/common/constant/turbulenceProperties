@@ -7,13 +7,17 @@ FoamFile
     object      turbulenceProperties;
 }
 
+{% if turbulence.laminar %}
+simulationType  laminar;
+{% else %}
 simulationType  RAS;
 
 RAS
 {
-    RASModel        kOmegaSST;
+    RASModel        {{ turbulence.model }};
     turbulence      on;
     printCoeffs     on;
 }
+{% endif %}
 
 // ************************************************************************* //
