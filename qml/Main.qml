@@ -16,6 +16,11 @@ ApplicationWindow {
     property color muted: "#8c9aab"
     property color accent: "#58d6bd"
 
+    function formatCoefficient(value) {
+        if (isNaN(value)) return "—"
+        return Math.abs(value) >= 1e-3 || value === 0 ? value.toFixed(4) : value.toExponential(2)
+    }
+
     header: ToolBar {
         background: Rectangle { color: "#0c1118"; border.color: "#202a36"; border.width: 1 }
         RowLayout {
@@ -133,17 +138,13 @@ ApplicationWindow {
                         spacing: 14
                         RowLayout {
                             Layout.fillWidth: true
-                            MetricCard { Layout.fillWidth: true; label: "DRAG COEFFICIENT"; value: "—" }
-                            MetricCard { Layout.fillWidth: true; label: "LIFT COEFFICIENT"; value: "—" }
-                            MetricCard { Layout.fillWidth: true; label: "CELLS"; value: "—" }
+                            MetricCard { Layout.fillWidth: true; label: "DRAG COEFFICIENT"; value: formatCoefficient(simulation.dragCoefficient) }
+                            MetricCard { Layout.fillWidth: true; label: "LIFT COEFFICIENT"; value: formatCoefficient(simulation.liftCoefficient) }
+                            MetricCard { Layout.fillWidth: true; label: "CELLS"; value: simulation.cellCount > 0 ? simulation.cellCount.toLocaleString(Qt.locale(), "f", 0) : "—" }
                         }
                         Rectangle {
                             Layout.fillWidth: true; Layout.fillHeight: true; radius: 16; color: panel; border.color: "#202a36"
-                            Column {
-                                anchors.centerIn: parent; spacing: 8
-                                Label { text: "Residuals & forces"; color: "#dce4ea"; font.pixelSize: 17; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                Label { text: "Convergence and force plots will appear as solver data is connected."; color: muted; font.pixelSize: 13; anchors.horizontalCenter: parent.horizontalCenter }
-                            }
+                            ResidualPlot { anchors.fill: parent; anchors.margins: 16; series: simulation.residuals }
                         }
                         Rectangle {
                             Layout.fillWidth: true; Layout.preferredHeight: 110; radius: 12; color: "#0a0f15"; border.color: "#202a36"

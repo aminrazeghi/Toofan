@@ -141,7 +141,7 @@ json buildTemplateData(const CaseOptions &options, const QString &solver, const 
     data["time"] = {
         {"endTime", round6(endTime)},
         {"deltaT", round6(0.2 * minCell / speed)},
-        {"writeInterval", round6(endTime / 20.0)},
+        {"writeInterval", round6(endTime / 60.0)},
         {"maxCo", compressible ? 1.0 : 2.0},
     };
     data["forces"] = {
@@ -238,7 +238,7 @@ bool resetCaseDirectory(const QDir &root, QString *error)
             QDir(entry.filePath()).removeRecursively();
     }
     for (const QString &log : root.entryList({QStringLiteral("*.log")}, QDir::Files))
-        root.remove(log);
+        QFile::remove(root.filePath(log));
     if (!root.mkpath(QStringLiteral("constant/triSurface"))) {
         *error = QStringLiteral("Cannot create the OpenFOAM case directory %1.").arg(root.path());
         return false;

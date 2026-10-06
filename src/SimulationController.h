@@ -1,7 +1,13 @@
 #pragma once
 #include <QFile>
+#include <QMap>
 #include <QObject>
+#include <QPointF>
 #include <QProcess>
+#include <QSet>
+#include <QTimer>
+#include <QVariantList>
+#include <cmath>
 
 class SimulationController : public QObject {
     Q_OBJECT
@@ -12,6 +18,12 @@ class SimulationController : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString solver READ solver NOTIFY solverChanged)
     Q_PROPERTY(QString log READ log NOTIFY logChanged)
+    // Live solver monitors, parsed from the running step's output. NaN / 0 until known.
+    Q_PROPERTY(double dragCoefficient READ dragCoefficient NOTIFY monitorsChanged)
+    Q_PROPERTY(double liftCoefficient READ liftCoefficient NOTIFY monitorsChanged)
+    Q_PROPERTY(int cellCount READ cellCount NOTIFY monitorsChanged)
+    // [{name, times: [...], values: [...]}] of initial residuals per field and time step.
+    Q_PROPERTY(QVariantList residuals READ residuals NOTIFY monitorsChanged)
 public:
     explicit SimulationController(QObject *parent = nullptr);
     QString stlPath() const { return m_stlPath; }
@@ -21,6 +33,10 @@ public:
     QString status() const { return m_status; }
     QString solver() const { return m_solver; }
     QString log() const { return m_log; }
+    double dragCoefficient() const { return m_dragCoefficient; }
+    double liftCoefficient() const { return m_liftCoefficient; }
+    int cellCount() const { return m_cellCount; }
+    QVariantList residuals() const;
     void setStlPath(const QString &path);
     void setCaseRoot(const QString &path);
     void setSpeed(double value);
@@ -29,12 +45,16 @@ public:
     Q_INVOKABLE void stopSimulation();
 signals:
     void stlPathChanged(); void caseRootChanged(); void speedChanged(); void meshQualityChanged();
-    void statusChanged(); void solverChanged(); void logChanged();
+    void statusChanged(); void solverChanged(); void logChanged(); void monitorsChanged();
 private:
     void appendLog(const QString &line);
     void runNextStep();
     void finishStep(const QString &summary);
     void writeStepLog(const QByteArray &data);
+    void parseOutput(const QByteArray &output);
+    void parseLine(const QString &line);
+    void resetMonitors();
+    void scheduleMonitorUpdate();
     QString m_stlPath;
     QString m_caseRoot;
     double m_speed = 20.0;
@@ -50,4 +70,12 @@ private:
     bool m_stopRequested = false;
     int m_step = 0;
     QProcess m_process;
+    QByteArray m_lineBuffer;
+    double m_time = 0.0;
+    QSet<QString> m_residualsThisStep;
+    QMap<QString, QList<QPointF>> m_residualHistory;
+    double m_dragCoefficient = std::nan("");
+    double m_liftCoefficient = std::nan("");
+    int m_cellCount = 0;
+    QTimer m_monitorTimer; // batches monitor notifications so QML repaints at most a few times per second
 };

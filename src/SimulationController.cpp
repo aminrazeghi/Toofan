@@ -2,6 +2,7 @@
 #include "OpenFoamCase.h"
 #include <QDir>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QUrl>
 
 SimulationController::SimulationController(QObject *parent) : QObject(parent), m_caseRoot(OpenFoamCase::defaultCaseRoot())
@@ -17,9 +18,13 @@ SimulationController::SimulationController(QObject *parent) : QObject(parent), m
     }
     // Merge stderr into stdout so each step's log file keeps the original interleaving.
     m_process.setProcessChannelMode(QProcess::MergedChannels);
+    m_monitorTimer.setSingleShot(true);
+    m_monitorTimer.setInterval(250);
+    connect(&m_monitorTimer, &QTimer::timeout, this, &SimulationController::monitorsChanged);
     connect(&m_process, &QProcess::readyReadStandardOutput, this, [this] {
         const QByteArray output = m_process.readAllStandardOutput();
         writeStepLog(output);
+        parseOutput(output);
         appendLog(QString::fromLocal8Bit(output).trimmed());
     });
     connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
@@ -84,7 +89,7 @@ void SimulationController::startSimulation()
                {QStringLiteral("snappyHexMesh"), {QStringLiteral("snappyHexMesh"), QStringLiteral("-overwrite")}},
                {QStringLiteral("copyInitialFields"), {QStringLiteral("cp"), QStringLiteral("-r"), QStringLiteral("0.orig"), QStringLiteral("0")}},
                {m_solver, {m_solver}}};
-    m_step = 0; m_stopRequested = false; appendLog(message); runNextStep();
+    m_step = 0; m_stopRequested = false; resetMonitors(); appendLog(message); runNextStep();
 }
 
 void SimulationController::runNextStep()
@@ -98,6 +103,7 @@ void SimulationController::runNextStep()
         appendLog(QStringLiteral("OpenFOAM environment not found. Set OPENFOAM_BASHRC to its etc/bashrc file.")); return;
     }
     const QString commandLine = step.command.join(QLatin1Char(' '));
+    m_lineBuffer.clear();
     m_stepLog.setFileName(QDir(m_casePath).filePath(step.name + QStringLiteral(".log")));
     if (!m_stepLog.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
         appendLog(QStringLiteral("Cannot write %1: %2").arg(m_stepLog.fileName(), m_stepLog.errorString()));
@@ -107,8 +113,9 @@ void SimulationController::runNextStep()
     m_process.setWorkingDirectory(m_casePath);
     // OpenFOAM's bashrc sets WM_PROJECT_DIR, FOAM_* paths, and library paths.
     // Run each utility in a fresh sourced shell so the GUI itself need not be launched from one.
-    QStringList args{QStringLiteral("-lc"),
-                     QStringLiteral("source \"$1\" >/dev/null && shift && exec \"$@\""),
+    // The bashrc treats positional parameters as config settings, so clear them before sourcing.
+    QStringList args{QStringLiteral("-c"),
+                     QStringLiteral("rc=\"$1\"; shift; cmd=(\"$@\"); set --; source \"$rc\" >/dev/null && exec \"${cmd[@]}\""),
                      QStringLiteral("windtunnel"), m_openFoamBashrc};
     args += step.command;
     m_process.start(QStringLiteral("/bin/bash"), args);
@@ -121,6 +128,7 @@ void SimulationController::writeStepLog(const QByteArray &data)
 
 void SimulationController::finishStep(const QString &summary)
 {
+    if (!m_lineBuffer.isEmpty()) { parseLine(QString::fromLocal8Bit(m_lineBuffer)); m_lineBuffer.clear(); }
     writeStepLog(QStringLiteral("\n# %1\n").arg(summary).toLocal8Bit());
     m_stepLog.close();
     appendLog(summary);
@@ -129,4 +137,93 @@ void SimulationController::finishStep(const QString &summary)
 void SimulationController::stopSimulation()
 {
     if (m_process.state() != QProcess::NotRunning) { m_stopRequested = true; m_process.terminate(); m_status = QStringLiteral("Stopping"); emit statusChanged(); }
+}
+
+void SimulationController::parseOutput(const QByteArray &output)
+{
+    // Process output arrives in arbitrary chunks; only parse complete lines.
+    m_lineBuffer += output;
+    qsizetype end;
+    while ((end = m_lineBuffer.indexOf('\n')) >= 0) {
+        parseLine(QString::fromLocal8Bit(m_lineBuffer.left(end)));
+        m_lineBuffer.remove(0, end + 1);
+    }
+}
+
+void SimulationController::parseLine(const QString &line)
+{
+    static const QRegularExpression cellsRe(QStringLiteral("cells:(\\d+)"));
+    static const QRegularExpression timeRe(QStringLiteral("^Time = (\\S+)\\s*$"));
+    static const QRegularExpression residualRe(QStringLiteral("Solving for (\\w+), Initial residual = ([^,]+),"));
+    static const QRegularExpression coefficientRe(QStringLiteral("^\\s*(Cd|Cl):\\s+(\\S+)"));
+    constexpr qsizetype maxPoints = 4000;
+
+    const QString &step = m_steps[m_step].name;
+    if (step == QStringLiteral("snappyHexMesh")) {
+        // The last "cells:" report is the final (snapped / layered) mesh.
+        if (const auto match = cellsRe.match(line); match.hasMatch()) { m_cellCount = match.captured(1).toInt(); scheduleMonitorUpdate(); }
+        return;
+    }
+    if (step != m_solver) return;
+
+    if (const auto match = timeRe.match(line); match.hasMatch()) {
+        m_time = match.captured(1).toDouble();
+        m_residualsThisStep.clear();
+        return;
+    }
+    if (const auto match = residualRe.match(line); match.hasMatch()) {
+        // Plot the first solve of each field per time step (the usual convergence measure);
+        // skip later PIMPLE correctors and trivially solved fields such as rho (residual 0).
+        const QString field = match.captured(1);
+        const double value = match.captured(2).toDouble();
+        if (value <= 0.0 || m_residualsThisStep.contains(field)) return;
+        m_residualsThisStep.insert(field);
+        QList<QPointF> &history = m_residualHistory[field];
+        history.append({m_time, value});
+        if (history.size() > maxPoints) { // halve the resolution of long runs instead of dropping their start
+            QList<QPointF> decimated;
+            decimated.reserve(history.size() / 2 + 1);
+            for (qsizetype i = 0; i < history.size(); i += 2) decimated.append(history[i]);
+            history = decimated;
+        }
+        scheduleMonitorUpdate();
+        return;
+    }
+    if (const auto match = coefficientRe.match(line); match.hasMatch()) {
+        bool ok = false;
+        const double value = match.captured(2).toDouble(&ok);
+        if (!ok) return;
+        (match.captured(1) == QStringLiteral("Cd") ? m_dragCoefficient : m_liftCoefficient) = value;
+        scheduleMonitorUpdate();
+    }
+}
+
+QVariantList SimulationController::residuals() const
+{
+    QVariantList series;
+    for (auto it = m_residualHistory.cbegin(); it != m_residualHistory.cend(); ++it) {
+        QList<double> times, values;
+        times.reserve(it.value().size()); values.reserve(it.value().size());
+        for (const QPointF &point : it.value()) { times.append(point.x()); values.append(point.y()); }
+        series.append(QVariantMap{{QStringLiteral("name"), it.key()},
+                                  {QStringLiteral("times"), QVariant::fromValue(times)},
+                                  {QStringLiteral("values"), QVariant::fromValue(values)}});
+    }
+    return series;
+}
+
+void SimulationController::resetMonitors()
+{
+    m_time = 0.0;
+    m_residualsThisStep.clear();
+    m_residualHistory.clear();
+    m_dragCoefficient = m_liftCoefficient = std::nan("");
+    m_cellCount = 0;
+    m_monitorTimer.stop();
+    emit monitorsChanged();
+}
+
+void SimulationController::scheduleMonitorUpdate()
+{
+    if (!m_monitorTimer.isActive()) m_monitorTimer.start();
 }
