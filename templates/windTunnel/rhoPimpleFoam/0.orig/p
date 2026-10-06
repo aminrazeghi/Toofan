@@ -14,8 +14,6 @@ internalField   uniform {{ flow.p }};
 
 boundaryField
 {
-    #includeEtc "caseDicts/setConstraintTypes"
-
     inlet
     {
         type            zeroGradient;

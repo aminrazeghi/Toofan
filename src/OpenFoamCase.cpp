@@ -243,6 +243,11 @@ bool resetCaseDirectory(const QDir &root, QString *error)
         *error = QStringLiteral("Cannot create the OpenFOAM case directory %1.").arg(root.path());
         return false;
     }
+    QFile foamFile(root.filePath(QStringLiteral("case.foam"))); // lets ParaView and the preview open the case
+    if (!foamFile.open(QIODevice::WriteOnly)) {
+        *error = QStringLiteral("Cannot write %1: %2").arg(foamFile.fileName(), foamFile.errorString());
+        return false;
+    }
     QFile marker(root.filePath(kCaseMarker));
     if (!marker.open(QIODevice::WriteOnly)) {
         *error = QStringLiteral("Cannot write %1: %2").arg(marker.fileName(), marker.errorString());

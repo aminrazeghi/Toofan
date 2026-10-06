@@ -1,5 +1,6 @@
 #pragma once
 #include <QFile>
+#include <QFileSystemWatcher>
 #include <QMap>
 #include <QObject>
 #include <QPointF>
@@ -18,6 +19,9 @@ class SimulationController : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString solver READ solver NOTIFY solverChanged)
     Q_PROPERTY(QString log READ log NOTIFY logChanged)
+    Q_PROPERTY(QString casePath READ casePath NOTIFY casePathChanged)
+    // Bumped whenever the case has a new mesh or time step to show; 0 before meshing.
+    Q_PROPERTY(int previewRevision READ previewRevision NOTIFY previewRevisionChanged)
     // Live solver monitors, parsed from the running step's output. NaN / 0 until known.
     Q_PROPERTY(double dragCoefficient READ dragCoefficient NOTIFY monitorsChanged)
     Q_PROPERTY(double liftCoefficient READ liftCoefficient NOTIFY monitorsChanged)
@@ -33,6 +37,8 @@ public:
     QString status() const { return m_status; }
     QString solver() const { return m_solver; }
     QString log() const { return m_log; }
+    QString casePath() const { return m_casePath; }
+    int previewRevision() const { return m_previewRevision; }
     double dragCoefficient() const { return m_dragCoefficient; }
     double liftCoefficient() const { return m_liftCoefficient; }
     int cellCount() const { return m_cellCount; }
@@ -46,6 +52,7 @@ public:
 signals:
     void stlPathChanged(); void caseRootChanged(); void speedChanged(); void meshQualityChanged();
     void statusChanged(); void solverChanged(); void logChanged(); void monitorsChanged();
+    void casePathChanged(); void previewRevisionChanged();
 private:
     void appendLog(const QString &line);
     void runNextStep();
@@ -55,6 +62,10 @@ private:
     void parseLine(const QString &line);
     void resetMonitors();
     void scheduleMonitorUpdate();
+    void setPreviewRevision(int revision);
+    void watchTimeDirectories(bool enable);
+    void onCaseDirectoryChanged();
+    void publishLatestTime();
     QString m_stlPath;
     QString m_caseRoot;
     double m_speed = 20.0;
@@ -77,5 +88,9 @@ private:
     double m_dragCoefficient = std::nan("");
     double m_liftCoefficient = std::nan("");
     int m_cellCount = 0;
+    int m_previewRevision = 0;
+    double m_previewTime = 0.0;         // latest time step announced to the preview
+    QFileSystemWatcher m_caseWatcher;   // watches the case and newest time directory while the solver runs
+    QTimer m_timeStepSettle;            // waits for a time directory to be completely written
     QTimer m_monitorTimer; // batches monitor notifications so QML repaints at most a few times per second
 };

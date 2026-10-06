@@ -21,6 +21,10 @@ SimulationController::SimulationController(QObject *parent) : QObject(parent), m
     m_monitorTimer.setSingleShot(true);
     m_monitorTimer.setInterval(250);
     connect(&m_monitorTimer, &QTimer::timeout, this, &SimulationController::monitorsChanged);
+    m_timeStepSettle.setSingleShot(true);
+    m_timeStepSettle.setInterval(1000);
+    connect(&m_timeStepSettle, &QTimer::timeout, this, &SimulationController::publishLatestTime);
+    connect(&m_caseWatcher, &QFileSystemWatcher::directoryChanged, this, &SimulationController::onCaseDirectoryChanged);
     connect(&m_process, &QProcess::readyReadStandardOutput, this, [this] {
         const QByteArray output = m_process.readAllStandardOutput();
         writeStepLog(output);
@@ -45,6 +49,8 @@ SimulationController::SimulationController(QObject *parent) : QObject(parent), m
             m_status = QStringLiteral("Failed"); emit statusChanged(); return;
         }
         finishStep(QStringLiteral("%1 finished.").arg(name));
+        if (name == QStringLiteral("blockMesh") || name == QStringLiteral("snappyHexMesh"))
+            setPreviewRevision(m_previewRevision + 1);
         ++m_step;
         runNextStep();
     });
@@ -79,6 +85,9 @@ void SimulationController::startSimulation()
     if (m_process.state() != QProcess::NotRunning) return;
     m_solver = OpenFoamCase::solverForSpeed(m_speed); emit solverChanged();
     m_casePath = QDir(m_caseRoot).filePath(QFileInfo(m_stlPath).completeBaseName());
+    emit casePathChanged();
+    setPreviewRevision(0);
+    m_previewTime = 0.0;
     QString message;
     if (!OpenFoamCase::prepare({m_stlPath, m_casePath, m_meshQuality, m_speed}, &message)) {
         m_status = QStringLiteral("Needs attention"); emit statusChanged(); appendLog(message); return;
@@ -111,6 +120,7 @@ void SimulationController::runNextStep()
     m_status = QStringLiteral("Running %1").arg(step.name); emit statusChanged();
     appendLog(QStringLiteral("$ %1").arg(commandLine));
     m_process.setWorkingDirectory(m_casePath);
+    watchTimeDirectories(step.name == m_solver);
     // OpenFOAM's bashrc sets WM_PROJECT_DIR, FOAM_* paths, and library paths.
     // Run each utility in a fresh sourced shell so the GUI itself need not be launched from one.
     // The bashrc treats positional parameters as config settings, so clear them before sourcing.
@@ -128,6 +138,10 @@ void SimulationController::writeStepLog(const QByteArray &data)
 
 void SimulationController::finishStep(const QString &summary)
 {
+    if (m_steps[m_step].name == m_solver) {
+        watchTimeDirectories(false);
+        publishLatestTime(); // the process has exited, so the last write is complete
+    }
     if (!m_lineBuffer.isEmpty()) { parseLine(QString::fromLocal8Bit(m_lineBuffer)); m_lineBuffer.clear(); }
     writeStepLog(QStringLiteral("\n# %1\n").arg(summary).toLocal8Bit());
     m_stepLog.close();
@@ -226,4 +240,53 @@ void SimulationController::resetMonitors()
 void SimulationController::scheduleMonitorUpdate()
 {
     if (!m_monitorTimer.isActive()) m_monitorTimer.start();
+}
+
+void SimulationController::setPreviewRevision(int revision)
+{
+    if (m_previewRevision != revision) { m_previewRevision = revision; emit previewRevisionChanged(); }
+}
+
+void SimulationController::watchTimeDirectories(bool enable)
+{
+    m_timeStepSettle.stop();
+    if (const QStringList watched = m_caseWatcher.directories(); !watched.isEmpty())
+        m_caseWatcher.removePaths(watched);
+    if (enable)
+        m_caseWatcher.addPath(m_casePath);
+}
+
+namespace {
+// Newest time directory after 0, or {} when the solver has not written one yet.
+QString latestTimeDirectory(const QString &casePath, double *time)
+{
+    QString latest;
+    *time = 0.0;
+    for (const QString &name : QDir(casePath).entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        bool ok = false;
+        const double value = name.toDouble(&ok);
+        if (ok && value > *time) { *time = value; latest = name; }
+    }
+    return latest;
+}
+}
+
+void SimulationController::onCaseDirectoryChanged()
+{
+    // A new time directory appears first and its field files follow; also watch it and wait
+    // until both stay quiet before showing it.
+    double time = 0.0;
+    const QString latest = latestTimeDirectory(m_casePath, &time);
+    if (latest.isEmpty() || time <= m_previewTime) return;
+    const QString path = QDir(m_casePath).filePath(latest);
+    if (!m_caseWatcher.directories().contains(path)) m_caseWatcher.addPath(path);
+    m_timeStepSettle.start();
+}
+
+void SimulationController::publishLatestTime()
+{
+    double time = 0.0;
+    if (latestTimeDirectory(m_casePath, &time).isEmpty() || time <= m_previewTime) return;
+    m_previewTime = time;
+    setPreviewRevision(m_previewRevision + 1);
 }

@@ -13,8 +13,6 @@ internalField   uniform {{ flow.T }};
 
 boundaryField
 {
-    #includeEtc "caseDicts/setConstraintTypes"
-
     inlet
     {
         type            fixedValue;

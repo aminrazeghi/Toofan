@@ -13,8 +13,6 @@ internalField   uniform 0;
 
 boundaryField
 {
-    #includeEtc "caseDicts/setConstraintTypes"
-
     "(inlet|outlet|tunnelWalls)"
     {
         type            calculated;

@@ -125,7 +125,20 @@ ApplicationWindow {
                     currentIndex: tabs.currentIndex; Layout.fillWidth: true; Layout.fillHeight: true
                     Rectangle {
                         radius: 16; color: panel; border.color: "#202a36"
-                        VtkView { anchors.fill: parent; stlFile: simulation.stlPath }
+                        VtkView {
+                            id: vtkView
+                            anchors.fill: parent; anchors.margins: 1
+                            stlFile: simulation.stlPath
+                            casePath: simulation.casePath
+                            previewRevision: simulation.previewRevision
+                        }
+                        Rectangle {
+                            visible: vtkView.previewInfo.length > 0
+                            anchors { left: parent.left; top: parent.top; margins: 14 }
+                            radius: 8; color: "#cc0d131b"; border.color: "#283342"
+                            implicitWidth: previewLabel.implicitWidth + 20; implicitHeight: previewLabel.implicitHeight + 12
+                            Label { id: previewLabel; anchors.centerIn: parent; text: vtkView.previewInfo; color: "#d9e1e8"; font.pixelSize: 12 }
+                        }
                         Column {
                             anchors.centerIn: parent; spacing: 12
                             visible: simulation.stlPath.length === 0
