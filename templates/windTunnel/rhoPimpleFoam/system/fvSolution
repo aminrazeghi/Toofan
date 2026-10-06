@@ -1,0 +1,60 @@
+{% include "banner" %}
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      fvSolution;
+}
+
+solvers
+{
+    p
+    {
+        solver          GAMG;
+        smoother        GaussSeidel;
+        tolerance       1e-6;
+        relTol          0.01;
+    }
+
+    pFinal
+    {
+        $p;
+        relTol          0;
+    }
+
+    "(rho|U|k|omega|e)"
+    {
+        solver          PBiCGStab;
+        preconditioner  DILU;
+        tolerance       1e-6;
+        relTol          0.1;
+    }
+
+    "(rho|U|k|omega|e)Final"
+    {
+        $U;
+        relTol          0;
+    }
+}
+
+PIMPLE
+{
+    momentumPredictor        yes;
+    transonic                {% if flow.transonic %}yes{% else %}no{% endif %};
+    nOuterCorrectors         2;
+    nCorrectors              2;
+    nNonOrthogonalCorrectors 1;
+    pMinFactor               0.1;
+    pMaxFactor               2;
+}
+
+relaxationFactors
+{
+    equations
+    {
+        ".*"            1;
+    }
+}
+
+// ************************************************************************* //

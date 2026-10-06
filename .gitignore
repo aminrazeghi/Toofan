@@ -1,0 +1,8 @@
+/build/
+CMakeUserPresets.json
+*.user
+*.foam
+*.vtk
+*.vtu
+*.case
+compile_commands.json

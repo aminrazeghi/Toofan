@@ -1,0 +1,65 @@
+{% include "banner" %}
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      blockMeshDict;
+}
+
+scale   1;
+
+xMin    {{ domain.xMin }};
+xMax    {{ domain.xMax }};
+yMin    {{ domain.yMin }};
+yMax    {{ domain.yMax }};
+zMin    {{ domain.zMin }};
+zMax    {{ domain.zMax }};
+
+vertices
+(
+    ($xMin $yMin $zMin)
+    ($xMax $yMin $zMin)
+    ($xMax $yMax $zMin)
+    ($xMin $yMax $zMin)
+    ($xMin $yMin $zMax)
+    ($xMax $yMin $zMax)
+    ($xMax $yMax $zMax)
+    ($xMin $yMax $zMax)
+);
+
+blocks
+(
+    hex (0 1 2 3 4 5 6 7) ({{ domain.nx }} {{ domain.ny }} {{ domain.nz }}) simpleGrading (1 1 1)
+);
+
+edges
+(
+);
+
+boundary
+(
+    inlet
+    {
+        type patch;
+        faces ((0 4 7 3));
+    }
+    outlet
+    {
+        type patch;
+        faces ((1 2 6 5));
+    }
+    tunnelWalls
+    {
+        type patch;
+        faces
+        (
+            (0 1 5 4)
+            (3 7 6 2)
+            (0 3 2 1)
+            (4 5 6 7)
+        );
+    }
+);
+
+// ************************************************************************* //

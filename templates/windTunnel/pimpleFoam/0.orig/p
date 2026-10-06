@@ -1,0 +1,38 @@
+{% include "banner" %}
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      p;
+}
+
+// Kinematic pressure (p/rho)
+dimensions      [0 2 -2 0 0 0 0];
+
+internalField   uniform 0;
+
+boundaryField
+{
+    #includeEtc "caseDicts/setConstraintTypes"
+
+    inlet
+    {
+        type            zeroGradient;
+    }
+    outlet
+    {
+        type            fixedValue;
+        value           $internalField;
+    }
+    tunnelWalls
+    {
+        type            slip;
+    }
+    {{ surface.group }}
+    {
+        type            zeroGradient;
+    }
+}
+
+// ************************************************************************* //

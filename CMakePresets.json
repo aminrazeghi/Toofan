@@ -1,0 +1,37 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 18,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "localvtk",
+      "displayName": "Local VTK in ~/.local",
+      "description": "Build with the VTK 9.6 package installed in ~/.local",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "/home/amin/.local",
+        "CMAKE_PREFIX_PATH": "/home/amin/.local",
+        "VTK_DIR": "/home/amin/.local/lib/cmake/vtk-9.6"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "localvtk",
+      "configurePreset": "localvtk"
+    }
+  ]
+}

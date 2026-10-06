@@ -1,0 +1,124 @@
+{% include "banner" %}
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      snappyHexMeshDict;
+}
+
+castellatedMesh true;
+snap            true;
+addLayers       {{ mesh.addLayers }};
+
+geometry
+{
+    {{ surface.file }}
+    {
+        type triSurfaceMesh;
+        name {{ surface.name }};
+    }
+
+    refinementBox
+    {
+        type box;
+        min  {{ vec(mesh.refinementBox.min) }};
+        max  {{ vec(mesh.refinementBox.max) }};
+    }
+}
+
+castellatedMeshControls
+{
+    maxLocalCells       {{ mesh.maxLocalCells }};
+    maxGlobalCells      {{ mesh.maxGlobalCells }};
+    minRefinementCells  10;
+    maxLoadUnbalance    0.10;
+    nCellsBetweenLevels 3;
+
+    features
+    (
+        {
+            file  "{{ surface.eMesh }}";
+            level {{ mesh.featureLevel }};
+        }
+    );
+
+    refinementSurfaces
+    {
+        {{ surface.name }}
+        {
+            level ({{ mesh.surfaceLevelMin }} {{ mesh.surfaceLevelMax }});
+            patchInfo
+            {
+                type     wall;
+                inGroups ({{ surface.group }});
+            }
+        }
+    }
+
+    resolveFeatureAngle 30;
+
+    refinementRegions
+    {
+        refinementBox
+        {
+            mode   inside;
+            levels ((1e15 {{ mesh.boxLevel }}));
+        }
+    }
+
+    locationInMesh {{ vec(mesh.locationInMesh) }};
+    allowFreeStandingZoneFaces true;
+}
+
+snapControls
+{
+    nSmoothPatch    3;
+    tolerance       2.0;
+    nSolveIter      30;
+    nRelaxIter      5;
+    nFeatureSnapIter 10;
+    implicitFeatureSnap    false;
+    explicitFeatureSnap    true;
+    multiRegionFeatureSnap false;
+}
+
+addLayersControls
+{
+    relativeSizes   true;
+
+    layers
+    {
+        "{{ surface.name }}.*"
+        {
+            nSurfaceLayers {{ mesh.nSurfaceLayers }};
+        }
+    }
+
+    expansionRatio      1.2;
+    finalLayerThickness 0.4;
+    minThickness        0.1;
+    nGrow               0;
+    featureAngle        60;
+    slipFeatureAngle    30;
+    nRelaxIter          3;
+    nSmoothSurfaceNormals 1;
+    nSmoothNormals      3;
+    nSmoothThickness    10;
+    maxFaceThicknessRatio 0.5;
+    maxThicknessToMedialRatio 0.3;
+    minMedialAxisAngle  90;
+    nBufferCellsNoExtrude 0;
+    nLayerIter          50;
+}
+
+meshQualityControls
+{
+    #includeEtc "caseDicts/meshQualityDict"
+    nSmoothScale    4;
+    errorReduction  0.75;
+}
+
+mergeTolerance 1e-6;
+
+// ************************************************************************* //

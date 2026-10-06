@@ -1,0 +1,66 @@
+{% include "banner" %}
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      controlDict;
+}
+
+application     {{ solver }};
+
+startFrom       latestTime;
+startTime       0;
+stopAt          endTime;
+endTime         {{ time.endTime }};
+deltaT          {{ time.deltaT }};
+
+writeControl    adjustable;
+writeInterval   {{ time.writeInterval }};
+purgeWrite      0;
+writeFormat     binary;
+writePrecision  6;
+writeCompression off;
+timeFormat      general;
+timePrecision   6;
+runTimeModifiable true;
+
+adjustTimeStep  yes;
+maxCo           {{ time.maxCo }};
+
+functions
+{
+    forceCoeffs
+    {
+        type            forceCoeffs;
+        libs            (forces);
+        writeControl    timeStep;
+        writeInterval   1;
+        log             yes;
+
+        patches         ({{ surface.group }});
+{% if compressible %}
+        rho             rho;
+{% else %}
+        rho             rhoInf;
+{% endif %}
+        rhoInf          {{ flow.rhoInf }};
+        liftDir         (0 0 1);
+        dragDir         (1 0 0);
+        pitchAxis       (0 1 0);
+        CofR            {{ vec(forces.CofR) }};
+        magUInf         {{ flow.Umag }};
+        lRef            {{ forces.lRef }};
+        Aref            {{ forces.Aref }};
+    }
+
+    solverInfo
+    {
+        type            solverInfo;
+        libs            (utilityFunctionObjects);
+        fields          (U p);
+        writeResidualFields no;
+    }
+}
+
+// ************************************************************************* //

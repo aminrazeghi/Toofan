@@ -1,0 +1,3 @@
+[submodule "external/inja"]
+	path = external/inja
+	url = https://github.com/pantor/inja.git

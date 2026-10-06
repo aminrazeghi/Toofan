@@ -1,0 +1,43 @@
+{% include "banner" %}
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      p;
+}
+
+// Absolute pressure; free-stream Mach {{ flow.mach }}
+dimensions      [1 -1 -2 0 0 0 0];
+
+internalField   uniform {{ flow.p }};
+
+boundaryField
+{
+    #includeEtc "caseDicts/setConstraintTypes"
+
+    inlet
+    {
+        type            zeroGradient;
+    }
+    outlet
+    {
+        type            waveTransmissive;
+        field           p;
+        psi             thermo:psi;
+        gamma           1.4;
+        fieldInf        {{ flow.p }};
+        lInf            {{ domain.length }};
+        value           $internalField;
+    }
+    tunnelWalls
+    {
+        type            slip;
+    }
+    {{ surface.group }}
+    {
+        type            zeroGradient;
+    }
+}
+
+// ************************************************************************* //

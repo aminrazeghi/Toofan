@@ -1,0 +1,40 @@
+{% include "banner" %}
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      k;
+}
+
+dimensions      [0 2 -2 0 0 0 0];
+
+internalField   uniform {{ flow.k }};
+
+boundaryField
+{
+    #includeEtc "caseDicts/setConstraintTypes"
+
+    inlet
+    {
+        type            fixedValue;
+        value           $internalField;
+    }
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      $internalField;
+        value           $internalField;
+    }
+    tunnelWalls
+    {
+        type            slip;
+    }
+    {{ surface.group }}
+    {
+        type            kqRWallFunction;
+        value           $internalField;
+    }
+}
+
+// ************************************************************************* //
