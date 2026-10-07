@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(DigitalWindTunnel VERSION 0.1.0 LANGUAGES CXX)
+project(DigitalWindTunnel LANGUAGES CXX) # app version: qml/AboutDialog.qml
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -28,7 +28,9 @@ qt_add_executable(digital-wind-tunnel src/main.cpp src/SimulationController.cpp 
 set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(digital-wind-tunnel URI WindTunnel VERSION 1.0 QML_FILES
   qml/Main.qml qml/MetricCard.qml qml/LinePlot.qml qml/SegmentedControl.qml
-  qml/Theme.qml qml/NumberField.qml qml/AdvancedSettings.qml qml/SettingsDialog.qml qml/OrientationControl.qml)
+  qml/Theme.qml qml/NumberField.qml qml/AdvancedSettings.qml qml/SettingsDialog.qml qml/OrientationControl.qml
+  qml/AboutDialog.qml qml/FloatingPanel.qml)
+qt_add_resources(digital-wind-tunnel app_assets PREFIX "/" FILES assets/toofan-cfd-icon.svg assets/toofan-cfd-logo.svg)
 file(GLOB_RECURSE DWT_CASE_TEMPLATES CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" templates/windTunnel/*)
 list(FILTER DWT_CASE_TEMPLATES EXCLUDE REGEX "\\.md$")
 qt_add_resources(digital-wind-tunnel case_templates PREFIX "/" FILES ${DWT_CASE_TEMPLATES})

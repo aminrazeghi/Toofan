@@ -1,5 +1,2 @@
-- Rotate STL file (both file and actor)
-- add logo
-- Toofan CFD should open About page (github repo link, author name)
-- Remove top bar of window
-- console should show the end of the logs
+- Add max iteration and converge criterion to advance tab
+- Download or ship openfoam with the App

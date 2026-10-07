@@ -4,6 +4,8 @@ import QtQuick
 // App colors for the dark and light themes.
 QtObject {
     property bool dark: true
+    // Corner radius of the frameless window (0 when maximized); modal dimming follows it.
+    property int windowRadius: 0
 
     readonly property color window: dark ? "#0c1118" : "#e7ecf0"
     readonly property color panel: dark ? "#111821" : "#ffffff"
@@ -14,6 +16,7 @@ QtObject {
     readonly property color field: dark ? "#0d131b" : "#f6f8fa"          // inputs, drop zone
     readonly property color consoleBackground: dark ? "#0a0f15" : "#f6f8fa"
     readonly property color overlay: dark ? "#cc0d131b" : "#e6ffffff"    // labels over the 3D view
+    readonly property color floating: dark ? "#e6111821" : "#ebffffff"   // panels over the 3D view
     readonly property color divider: dark ? "#27313d" : "#e1e6eb"
     readonly property color text: dark ? "#d9e1e8" : "#2a3540"
     readonly property color textStrong: dark ? "#f2f5f8" : "#111a22"

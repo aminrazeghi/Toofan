@@ -10,6 +10,7 @@ class vtkRenderWindow;
 #include <QString>
 #include <QVariantList>
 #include <QVector3D>
+#include <QVector4D>
 #include <QtQml/qqmlregistration.h>
 #include <memory>
 
@@ -35,6 +36,9 @@ class VtkView : public QQuickItem
     Q_PROPERTY(QString field READ field WRITE setField NOTIFY fieldChanged)
     // Orientation of the imported STL, degrees about x, then y, then z (as the case will be meshed).
     Q_PROPERTY(QVector3D modelRotation READ modelRotation WRITE setModelRotation NOTIFY modelRotationChanged)
+    // Window edges covered by floating panels, in item pixels (left, top, right, bottom). The model
+    // is centred and framed in the uncovered area, and the color bar kept inside it.
+    Q_PROPERTY(QVector4D viewInsets READ viewInsets WRITE setViewInsets NOTIFY viewInsetsChanged)
     // Contour palette, one of colorMaps()[i].value.
     Q_PROPERTY(QString colorMap READ colorMap WRITE setColorMap NOTIFY colorMapChanged)
     // Background and annotation colors follow the app theme.
@@ -59,6 +63,8 @@ public:
     void setField(const QString &field);
     QVector3D modelRotation() const { return m_modelRotation; }
     void setModelRotation(const QVector3D &rotation);
+    QVector4D viewInsets() const { return m_viewInsets; }
+    void setViewInsets(const QVector4D &insets);
     QString colorMap() const { return m_colorMap; }
     void setColorMap(const QString &colorMap);
     bool darkTheme() const { return m_darkTheme; }
@@ -82,6 +88,7 @@ signals:
     void renderModeChanged();
     void fieldChanged();
     void modelRotationChanged();
+    void viewInsetsChanged();
     void colorMapChanged();
     void darkThemeChanged();
     void previewInfoChanged();
@@ -102,6 +109,7 @@ private:
     QString m_renderMode = QStringLiteral("slice");
     QString m_field = QStringLiteral("U");
     QVector3D m_modelRotation;
+    QVector4D m_viewInsets;
     QString m_colorMap = QStringLiteral("viridis");
     bool m_darkTheme = true;
     QString m_previewInfo;

@@ -366,6 +366,8 @@ vtkStandardNewMacro(PreviewScene);
 struct SceneState {
     QString stlPath;
     QVector3D rotation;
+    QVector4D insets;  // left, top, right, bottom
+    QSizeF size;       // item size, same units as insets
     std::shared_ptr<const CasePreview> preview;
     QString colorMap;
     bool darkTheme = true;
@@ -462,8 +464,9 @@ void setupScene(PreviewScene *scene)
     renderer->AddViewProp(scene->scalarBar);
 }
 
-// Side view along +y with the flow (+x) running left to right.
-void frameCamera(vtkRenderer *renderer, const double bounds[6])
+// Side view along +y with the flow (+x) running left to right. `visible` is the uncovered
+// fraction of the window, so the framed region fits between the floating panels.
+void frameCamera(vtkRenderer *renderer, const double bounds[6], double visible)
 {
     if (bounds[0] > bounds[1])
         return;
@@ -475,8 +478,31 @@ void frameCamera(vtkRenderer *renderer, const double bounds[6])
     renderer->ResetCamera(bounds);
     camera->Azimuth(-12);
     camera->Elevation(10);
-    camera->Zoom(1.5); // ResetCamera fits a bounding sphere, which leaves a wide margin
+    camera->Zoom(1.5 * visible); // ResetCamera fits a bounding sphere, which leaves a wide margin
     renderer->ResetCameraClippingRange();
+}
+
+// Shift the projection so the view centre is the middle of the uncovered area, and keep the
+// color bar inside it. Leaves the camera itself (and the user's rotation/zoom) alone.
+void applyInsets(PreviewScene *scene, const QVector4D &insets, const QSizeF &size)
+{
+    const double w = size.width(), h = size.height();
+    if (w <= 0 || h <= 0)
+        return;
+    // A point projected to the window centre is drawn at -WindowCenter (normalised [-1, 1]).
+    scene->renderer->GetActiveCamera()->SetWindowCenter((insets.z() - insets.x()) / w, (insets.y() - insets.w()) / h);
+    const double barWidth = 84, barHeight = std::max(120.0, std::min(300.0, 0.6 * (h - insets.y() - insets.w())));
+    scene->scalarBar->SetPosition(std::max(0.0, (w - insets.z() - barWidth - 8) / w), (insets.w() + 16) / h);
+    scene->scalarBar->SetPosition2(barWidth / w, barHeight / h);
+}
+
+double visibleFraction(const SceneState &state)
+{
+    const double w = state.size.width(), h = state.size.height();
+    if (w <= 0 || h <= 0)
+        return 1.0;
+    const QVector4D &i = state.insets;
+    return std::clamp(std::min((w - i.x() - i.z()) / w, (h - i.y() - i.w()) / h), 0.2, 1.0);
 }
 
 // Box of the computational domain (as blockMesh will build it), its inlet face and an arrow
@@ -654,11 +680,12 @@ void syncScene(PreviewScene *scene, const SceneState &state)
                           static_cast<vtkProp *>(scene->axes.Get())})
         prop->SetVisibility(showTunnel);
 
+    applyInsets(scene, state.insets, state.size);
     if (reframe) {
         if (preview) {
-            frameCamera(scene->renderer, preview->focus);
+            frameCamera(scene->renderer, preview->focus, visibleFraction(state));
         } else if (scene->hasStl) {
-            frameCamera(scene->renderer, scene->tunnelView);
+            frameCamera(scene->renderer, scene->tunnelView, visibleFraction(state));
         }
     }
 }
@@ -674,7 +701,7 @@ QQuickVTKItem::vtkUserData VtkView::initializeVTK(vtkRenderWindow *renderWindow)
     auto scene = vtkSmartPointer<PreviewScene>::New();
     setupScene(scene);
     renderWindow->AddRenderer(scene->renderer);
-    syncScene(scene, {m_stlFile, m_modelRotation, m_preview, m_colorMap, m_darkTheme});
+    syncScene(scene, {m_stlFile, m_modelRotation, m_viewInsets, size(), m_preview, m_colorMap, m_darkTheme});
     return scene;
 }
 #else
@@ -689,6 +716,9 @@ VtkView::VtkView(QQuickItem *parent)
     : QQuickItem(parent)
 #endif
 {
+    // Insets are in pixels; the projection shift depends on the item size.
+    connect(this, &QQuickItem::widthChanged, this, [this] { updateScene(); });
+    connect(this, &QQuickItem::heightChanged, this, [this] { updateScene(); });
 }
 
 VtkView::~VtkView() = default;
@@ -730,6 +760,15 @@ void VtkView::setModelRotation(const QVector3D &rotation)
         return;
     m_modelRotation = rotation;
     emit modelRotationChanged();
+    updateScene();
+}
+
+void VtkView::setViewInsets(const QVector4D &insets)
+{
+    if (m_viewInsets == insets)
+        return;
+    m_viewInsets = insets;
+    emit viewInsetsChanged();
     updateScene();
 }
 
@@ -855,7 +894,7 @@ void VtkView::applyJobResult(int generation, std::shared_ptr<const CaseData> dat
 void VtkView::updateScene()
 {
 #ifdef WINDTUNNEL_HAS_VTK
-    dispatch_async([state = SceneState{m_stlFile, m_modelRotation, m_preview, m_colorMap, m_darkTheme}](vtkRenderWindow *, vtkUserData userData) {
+    dispatch_async([state = SceneState{m_stlFile, m_modelRotation, m_viewInsets, size(), m_preview, m_colorMap, m_darkTheme}](vtkRenderWindow *, vtkUserData userData) {
         if (auto scene = PreviewScene::SafeDownCast(userData))
             syncScene(scene, state);
     });

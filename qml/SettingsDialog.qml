@@ -17,7 +17,7 @@ Popup {
     width: 420
     padding: 22
     background: Rectangle { radius: 14; color: Theme.panel; border.color: Theme.border }
-    Overlay.modal: Rectangle { color: "#80000000" }
+    Overlay.modal: Rectangle { color: "#80000000"; radius: Theme.windowRadius }
 
     ColumnLayout {
         width: parent.width
