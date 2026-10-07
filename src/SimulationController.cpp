@@ -1,5 +1,6 @@
 #include "SimulationController.h"
 #include "OpenFoamCase.h"
+#include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
@@ -7,7 +8,14 @@
 
 SimulationController::SimulationController(QObject *parent) : QObject(parent), m_caseRoot(OpenFoamCase::defaultCaseRoot())
 {
+    // OPENFOAM_BASHRC overrides; then a copy bundled with the app (packaging/package-linux.sh);
+    // then the newest system install.
     m_openFoamBashrc = qEnvironmentVariable("OPENFOAM_BASHRC");
+    if (m_openFoamBashrc.isEmpty()) {
+        const QString bundled = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../openfoam/etc/bashrc"));
+        if (QFileInfo::exists(bundled))
+            m_openFoamBashrc = QFileInfo(bundled).canonicalFilePath();
+    }
     if (m_openFoamBashrc.isEmpty()) {
         QDir installs(QStringLiteral("/usr/lib/openfoam"));
         const QStringList versions = installs.entryList(QStringList{QStringLiteral("openfoam*")}, QDir::Dirs, QDir::Name | QDir::Reversed);

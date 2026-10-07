@@ -6,3 +6,5 @@ CMakeUserPresets.json
 *.vtu
 *.case
 compile_commands.json
+/build-release/
+/dist/
