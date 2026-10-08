@@ -175,6 +175,23 @@ ApplicationWindow {
             Label { text: "Choose an STL to inspect it in 3D."; color: muted; font.pixelSize: 13; anchors.horizontalCenter: parent.horizontalCenter }
         }
 
+        // ---- Title bar area: the top strip of the window moves it, like a native title bar ----
+        Item {
+            id: titleStrip
+            anchors { left: parent.left; right: parent.right; top: parent.top }
+            height: edge + brandBar.height + gap / 2
+            WindowDragArea { anchors.fill: parent }
+            HoverHandler { id: titleHover }
+            // Grip, so the area reads as a handle.
+            Rectangle {
+                anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 6 }
+                width: 44; height: 4; radius: 2
+                color: Theme.textStrong
+                opacity: titleHover.hovered ? 0.45 : 0.18
+                Behavior on opacity { NumberAnimation { duration: 150 } }
+            }
+        }
+
         // ---- Top left: app icon (opens About) and name ----
         FloatingPanel {
             id: brandBar
@@ -214,6 +231,24 @@ ApplicationWindow {
                 id: actionRow
                 anchors.centerIn: parent
                 spacing: 8
+                ToolButton {
+                    enabled: !simulation.running
+                    ToolTip.visible: hovered; ToolTip.text: "New project"
+                    onClicked: {
+                        simulation.newProject()
+                        setupPanel.userCollapsed = false
+                        openPlot = ""
+                    }
+                    contentItem: Item { IconGlyph { anchors.centerIn: parent; kind: "plus"; color: parent.parent.enabled ? Theme.muted : Theme.faint } }
+                    background: Rectangle { radius: 9; color: parent.hovered ? Theme.controlHover : "transparent"; implicitWidth: 38; implicitHeight: 38 }
+                }
+                ToolButton {
+                    ToolTip.visible: hovered
+                    ToolTip.text: simulation.casePath ? "Open case folder" : "Open the cases folder"
+                    onClicked: simulation.openCaseFolder()
+                    contentItem: Item { IconGlyph { anchors.centerIn: parent; kind: "folder"; color: Theme.muted } }
+                    background: Rectangle { radius: 9; color: parent.hovered ? Theme.controlHover : "transparent"; implicitWidth: 38; implicitHeight: 38 }
+                }
                 ToolButton {
                     text: "⚙"
                     ToolTip.visible: hovered; ToolTip.text: "Settings"
@@ -501,7 +536,7 @@ ApplicationWindow {
                         required property var modelData
                         ToolTip.visible: hovered; ToolTip.text: modelData.tip; ToolTip.delay: 500
                         onClicked: modelData.act()
-                        contentItem: Item { PlaybackIcon { anchors.centerIn: parent; kind: modelData.icon; color: modelData.icon === "first" || modelData.icon === "last" ? Theme.text : accent } }
+                        contentItem: Item { IconGlyph { anchors.centerIn: parent; kind: modelData.icon; color: modelData.icon === "first" || modelData.icon === "last" ? Theme.text : accent } }
                         background: Rectangle { radius: 8; color: parent.hovered ? Theme.controlHover : "transparent"; implicitWidth: 34; implicitHeight: 34 }
                     }
                 }

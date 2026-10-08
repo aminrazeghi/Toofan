@@ -1,4 +1,0 @@
-- Add max iteration and converge criterion to advance tab
-- Animation button to show Animation of results (after simulation)
-- Windows and Mac
-- GitHub action

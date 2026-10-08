@@ -20,7 +20,7 @@ set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(digital-wind-tunnel URI WindTunnel VERSION 1.0 QML_FILES
   qml/Main.qml qml/MetricCard.qml qml/LinePlot.qml qml/SegmentedControl.qml
   qml/Theme.qml qml/NumberField.qml qml/AdvancedSettings.qml qml/SettingsDialog.qml qml/OrientationControl.qml
-  qml/AboutDialog.qml qml/FloatingPanel.qml qml/PlaybackIcon.qml)
+  qml/AboutDialog.qml qml/FloatingPanel.qml qml/IconGlyph.qml)
 qt_add_resources(digital-wind-tunnel app_assets PREFIX "/" FILES assets/toofan-cfd-icon.svg assets/toofan-cfd-logo.svg)
 file(GLOB_RECURSE DWT_CASE_TEMPLATES CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" templates/windTunnel/*)
 list(FILTER DWT_CASE_TEMPLATES EXCLUDE REGEX "\\.md$")
