@@ -1,0 +1,94 @@
+# Builds the Linux x86_64 packages (AppImage and tar.gz, with Qt, VTK and OpenFOAM bundled)
+# on every push to main and every pull request, and uploads them as workflow artifacts.
+# Pushing a tag v<version> (matching the version in qml/AboutDialog.qml) also publishes them
+# as a GitHub release.
+name: Build Linux packages
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.10.2"
+  VTK_VERSION: "9.6.2"
+  OPENFOAM_VERSION: "2606"
+  DEPS_DIR: /home/runner/deps   # Qt and VTK; cached between runs
+
+jobs:
+  linux-x86_64:
+    # The packages run on distributions with a glibc at least as new as this runner's.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="$(sed -n 's/.*readonly property string version: "\([^"]*\)".*/\1/p' qml/AboutDialog.qml)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the app version $version (qml/AboutDialog.qml)"
+            exit 1
+          fi
+
+      - name: Cache Qt and VTK
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.DEPS_DIR }}
+          key: deps-ubuntu-24.04-qt${{ env.QT_VERSION }}-vtk${{ env.VTK_VERSION }}-${{ hashFiles('packaging/ci/install-deps.sh') }}
+
+      - name: Install dependencies
+        run: packaging/ci/install-deps.sh
+
+      - name: Build and package
+        run: packaging/package-linux.sh --output dist
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum *.AppImage *.tar.gz | tee SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toofan-cfd-linux-x86_64
+          path: |
+            dist/*.AppImage
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0   # already compressed
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: linux-x86_64
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: toofan-cfd-linux-x86_64
+          path: dist
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Tags with a suffix (v0.2.0-rc1) are published as pre-releases.
+          prerelease=""
+          [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease="--prerelease"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Toofan CFD ${GITHUB_REF_NAME#v}" \
+            --generate-notes --verify-tag $prerelease
