@@ -4,7 +4,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Effects
 import QtQuick.Layouts
-import WindTunnel
+import Toofan
 
 ApplicationWindow {
     id: window
@@ -13,7 +13,7 @@ ApplicationWindow {
     minimumWidth: 1100
     minimumHeight: 700
     visible: true
-    title: "Toofan CFD"
+    title: "Toofan"
     // Frameless: the floating top bars move the window and hold its controls.
     flags: Qt.Window | Qt.FramelessWindowHint
     color: "transparent" // outside the rounded corners
@@ -208,14 +208,14 @@ ApplicationWindow {
                     Image {
                         anchors.centerIn: parent
                         width: 30; height: 30
-                        source: "qrc:/assets/toofan-cfd-icon.svg"
+                        source: "qrc:/assets/toofan-icon.svg"
                         sourceSize: Qt.size(60, 60)
                     }
                     HoverHandler { id: iconHover; cursorShape: Qt.PointingHandCursor }
                     TapHandler { onTapped: aboutDialog.open() }
-                    ToolTip.visible: iconHover.hovered; ToolTip.text: "About Toofan CFD"
+                    ToolTip.visible: iconHover.hovered; ToolTip.text: "About Toofan"
                 }
-                Label { text: "Toofan CFD"; color: Theme.textStrong; font.bold: true; font.letterSpacing: 2; rightPadding: 6 }
+                Label { text: "Toofan"; color: Theme.textStrong; font.bold: true; font.letterSpacing: 2; rightPadding: 6 }
             }
         }
 
@@ -399,6 +399,9 @@ ApplicationWindow {
                             width: advancedScroll.availableWidth - 10
                             settings: simulation.settings
                             solver: simulation.solver
+                            parallelAvailable: simulation.parallelAvailable
+                            mpiName: simulation.mpiName
+                            maxProcessors: simulation.maxProcessors
                         }
                     }
                 }
@@ -703,10 +706,16 @@ ApplicationWindow {
                             NumberAnimation { to: 1; duration: 650; easing.type: Easing.InOutSine }
                         }
                     }
-                    Label { text: statusPanel.status; color: Theme.textStrong; font.pixelSize: 16; font.weight: Font.DemiBold; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Label {
+                        text: statusPanel.status; color: Theme.textStrong; font.pixelSize: 16; font.weight: Font.DemiBold
+                        // Long step names (reconstructParMesh) shrink instead of being cut off.
+                        fontSizeMode: Text.HorizontalFit; minimumPixelSize: 11; elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
                 }
                 Label {
-                    text: simulation.solver + (simulation.simulatedTime > 0 ? "  ·  t = " + Number(simulation.simulatedTime.toPrecision(4)) + " s" : "")
+                    text: simulation.solver + (simulation.runProcessors > 1 ? "  ·  " + simulation.runProcessors + " proc" : "")
+                          + (simulation.simulatedTime > 0 ? "  ·  t = " + Number(simulation.simulatedTime.toPrecision(4)) + " s" : "")
                     color: muted; font.pixelSize: 12
                 }
                 Label {

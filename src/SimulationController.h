@@ -25,6 +25,12 @@ class SimulationController : public QObject {
     // A workflow is in progress (including while it is being stopped).
     Q_PROPERTY(bool running READ running NOTIFY statusChanged)
     Q_PROPERTY(QString solver READ solver NOTIFY solverChanged)
+    // The OpenFOAM environment has MPI (checked in the background at startup), so runs can use
+    // settings.processors > 1. mpiName is OpenFOAM's FOAM_MPI, e.g. sys-openmpi.
+    Q_PROPERTY(bool parallelAvailable READ parallelAvailable NOTIFY parallelAvailableChanged)
+    Q_PROPERTY(QString mpiName READ mpiName NOTIFY parallelAvailableChanged)
+    Q_PROPERTY(int maxProcessors READ maxProcessors CONSTANT) // hardware threads
+    Q_PROPERTY(int runProcessors READ runProcessors NOTIFY statusChanged) // MPI processes of the current or last run
     Q_PROPERTY(QString log READ log NOTIFY logChanged)
     Q_PROPERTY(QString casePath READ casePath NOTIFY casePathChanged)
     // Bumped whenever the case has a new mesh or time step to show; 0 before meshing.
@@ -53,6 +59,10 @@ public:
     QString status() const { return m_status; }
     bool running() const { return m_status.startsWith(QStringLiteral("Running ")) || m_status == QStringLiteral("Stopping"); }
     QString solver() const { return m_solver; }
+    bool parallelAvailable() const { return m_parallelAvailable; }
+    QString mpiName() const { return m_mpiName; }
+    static int maxProcessors();
+    int runProcessors() const { return m_runProcessors; }
     QString log() const { return m_log; }
     QString casePath() const { return m_casePath; }
     int previewRevision() const { return m_previewRevision; }
@@ -76,7 +86,7 @@ public:
 signals:
     void stlPathChanged(); void modelRotationChanged(); void caseRootChanged(); void speedChanged(); void meshQualityChanged();
     void statusChanged(); void solverChanged(); void logChanged(); void monitorsChanged();
-    void casePathChanged(); void previewRevisionChanged();
+    void casePathChanged(); void previewRevisionChanged(); void parallelAvailableChanged();
 private:
     void appendLog(const QString &line);
     void updateSolver();
@@ -91,6 +101,8 @@ private:
     void watchTimeDirectories(bool enable);
     void onCaseDirectoryChanged();
     void publishLatestTime();
+    void probeParallel();
+    QStringList bashCommand(const QStringList &command) const;
     QString m_stlPath;
     QString m_caseRoot;
     CaseSettings m_settings;
@@ -104,7 +116,12 @@ private:
     QString m_log;
     QString m_casePath;
     QString m_openFoamBashrc;
-    struct Step { QString name; QStringList command; }; // name.log is written in the case directory
+    bool m_parallelAvailable = false;
+    QString m_mpiName;
+    QString m_resultsPath; // where the solver writes time directories: the case, or processor0
+    int m_runProcessors = 1;
+    // name.log is written in the case directory; refreshPreview: the case mesh changed.
+    struct Step { QString name; QStringList command; bool refreshPreview = false; };
     QList<Step> m_steps;
     QFile m_stepLog;
     bool m_stopRequested = false;
@@ -120,7 +137,7 @@ private:
     int m_cellCount = 0;
     int m_previewRevision = 0;
     double m_previewTime = 0.0;         // latest time step announced to the preview
-    QFileSystemWatcher m_caseWatcher;   // watches the case and newest time directory while the solver runs
-    QTimer m_timeStepSettle;            // waits for a time directory to be completely written
+    QFileSystemWatcher m_caseWatcher;   // watches m_resultsPath for new time directories while the solver runs
+    QTimer m_timeStepSettle;            // gives a new time directory time to be completely written
     QTimer m_monitorTimer; // batches monitor notifications so QML repaints at most a few times per second
 };

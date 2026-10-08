@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds Toofan CFD and packages it for Linux x86_64 as an AppImage and a tar.gz, with
-# Qt, VTK and the OpenFOAM tools it runs (blockMesh, snappyHexMesh, the solvers) bundled.
+# Builds Toofan and packages it for Linux x86_64 as an AppImage and a tar.gz, with
+# Qt, VTK, the OpenFOAM tools it runs (blockMesh, snappyHexMesh, the solvers) and Open MPI for
+# parallel runs bundled.
 #
 #   packaging/package-linux.sh [--skip-build] [--no-appimage] [--no-tar] [--output DIR]
 #
@@ -9,6 +10,8 @@
 #   VTK_DIR        passed to CMake when configuring the release build
 #   QTPATHS        qtpaths executable of the Qt to bundle (default: qtpaths6)
 #   APPIMAGETOOL   appimagetool to use (default: downloaded once into dist/.cache)
+#   OPENMPI_DIR    Open MPI prefix built by packaging/build-openmpi.sh (default: built once
+#                  into dist/.cache; OPENMPI_VERSION picks the release)
 #
 # The result runs on distributions with glibc >= the build machine's (see the summary at the end).
 set -euo pipefail
@@ -16,9 +19,9 @@ set -euo pipefail
 # ---------------------------------------------------------------------------------------------
 # Settings
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="Toofan CFD"
-PKG_NAME="toofan-cfd"
-APP_BIN="digital-wind-tunnel"
+APP_NAME="Toofan"
+PKG_NAME="toofan"
+APP_BIN="toofan"
 ARCH="x86_64"
 BUILD_DIR="$ROOT/build-release"
 OUT_DIR="$ROOT/dist"
@@ -27,7 +30,10 @@ MAKE_APPIMAGE=1
 MAKE_TAR=1
 
 # OpenFOAM programs the app runs; everything they load comes along.
-OPENFOAM_PROGRAMS=(blockMesh surfaceFeatureExtract snappyHexMesh pimpleFoam rhoPimpleFoam checkMesh foamDictionary)
+OPENFOAM_PROGRAMS=(blockMesh surfaceFeatureExtract snappyHexMesh pimpleFoam rhoPimpleFoam checkMesh foamDictionary
+                   decomposePar reconstructPar reconstructParMesh)
+# Open MPI programs: mpirun starts prterun, which launches the processes on this machine.
+OPENMPI_PROGRAMS=(mpirun mpiexec prterun prted prte ompi_info)
 
 # Qt plugins: windowing (Wayland, X11), SVG icons and images, input methods.
 QT_PLUGINS=(
@@ -56,7 +62,7 @@ log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 is_elf() { [ -f "$1" ] && [ "$(head -c 4 "$1" | od -An -c | tr -d ' ')" = "177ELF" ]; }
 
@@ -164,10 +170,19 @@ APPDIR="$WORK/AppDir"
 USR="$APPDIR/usr"
 LIBDIR="$USR/lib"
 OF_DEST="$USR/openfoam"
+MPI_DEST="$USR/openmpi"
 
 log "$APP_NAME $VERSION for Linux $ARCH"
 info "Qt:       $("$QTPATHS" --query QT_VERSION) ($QT_PLUGIN_DIR)"
 info "OpenFOAM: $OPENFOAM_DIR"
+if [ -z "${OPENMPI_DIR:-}" ]; then
+    OPENMPI_DIR="$OUT_DIR/.cache/openmpi"
+    "$ROOT/packaging/build-openmpi.sh" "$OPENMPI_DIR"
+fi
+[ -x "$OPENMPI_DIR/bin/mpirun" ] && [ -f "$OPENMPI_DIR/lib/libmpi.so.40" ] \
+    || die "no Open MPI with libmpi.so.40 in $OPENMPI_DIR (build one with packaging/build-openmpi.sh)"
+OPENMPI_VERSION="$(cat "$OPENMPI_DIR/.openmpi-version" 2>/dev/null || echo unknown)"
+info "Open MPI: $OPENMPI_VERSION ($OPENMPI_DIR)"
 info "output:   $OUT_DIR"
 
 # ---------------------------------------------------------------------------------------------
@@ -232,33 +247,45 @@ for program in "${OPENFOAM_PROGRAMS[@]}"; do
     cp -a "$OPENFOAM_DIR/$OF_PLATFORM/bin/$program" "$OF_DEST/$OF_PLATFORM/bin/"
 done
 # All libraries: solvers load function objects, models and boundary conditions at run time.
-# Serial runs only, so no MPI: drop the MPI Pstream and the MPI-only decomposition library.
+# Both Pstream variants come along: dummy (serial) and sys-openmpi, which the bundled Open MPI serves.
 cp -a "$OPENFOAM_DIR/$OF_PLATFORM/lib" "$OF_DEST/$OF_PLATFORM/"
 OF_LIB="$OF_DEST/$OF_PLATFORM/lib"
-mpi_dirs=("$OF_LIB"/sys-* "$OF_LIB"/*mpi*)
-mapfile -t mpi_only < <(for d in "${mpi_dirs[@]}"; do [ -d "$d" ] && ls "$d"; done | sort -u | while read -r n; do [ -e "$OF_LIB/dummy/$n" ] || echo "$n"; done)
-rm -rf "${mpi_dirs[@]}"
-# Optional libraries built on MPI-only ones (e.g. the VTK-HDF writer) cannot load without MPI.
-while :; do
-    dropped=0
-    for lib in "$OF_LIB"/*.so "$OF_LIB"/dummy/*.so; do
-        [ -f "$lib" ] || continue
-        for need in $(patchelf --print-needed "$lib"); do
-            if printf '%s\n' "${mpi_only[@]}" | grep -qxF "$need"; then
-                info "dropping $(basename "$lib") (needs MPI-only $need)"
-                mpi_only+=("$(basename "$lib")"); rm -f "$lib"; dropped=1; break
-            fi
-        done
-    done
-    [ "$dropped" -eq 1 ] || break
+[ -f "$OF_LIB/sys-openmpi/libPstream.so" ] || die "$OPENFOAM_DIR has no sys-openmpi Pstream (OpenFOAM built without Open MPI?)"
+for d in "$OF_LIB"/*/; do
+    case "$(basename "$d")" in dummy|sys-openmpi) ;; *) info "dropping MPI variant $(basename "$d")"; rm -rf "$d" ;; esac
 done
+# The VTK-HDF writer (a function object the app does not use) needs a parallel HDF5, which
+# brings in curl, TLS and Kerberos libraries: leave it out.
+find "$OF_LIB" -name 'libfoam-vtkhdf*.so' -print -delete | while read -r lib; do info "dropping $(basename "$lib")"; done
 
-# The packaged bashrc hard-codes its install path and selects system Open MPI. Make it find
-# its own directory, and select no MPI (OpenFOAM falls back to the bundled dummy Pstream).
+# The packaged bashrc hard-codes its install path: make it find its own directory. Select the
+# system Open MPI mode, whose prefs file (normally the distribution's MPI location) points at
+# the bundled Open MPI next to OpenFOAM.
 bashrc="$OF_DEST/etc/bashrc"
 grep -q '^export WM_PROJECT_DIR=' "$bashrc" || die "unexpected $bashrc: no WM_PROJECT_DIR line"
 sed -i '/^export WM_PROJECT_DIR=/c\export WM_PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." \&\& pwd -P)"  # relocatable (bundled)' "$bashrc"
-sed -i 's/^export WM_MPLIB=.*/export WM_MPLIB=dummy  # bundled: serial only, no MPI/' "$bashrc"
+sed -i 's/^export WM_MPLIB=.*/export WM_MPLIB=SYSTEMOPENMPI  # bundled Open MPI, see etc\/config.sh\/prefs.sys-openmpi/' "$bashrc"
+cat > "$OF_DEST/etc/config.sh/prefs.sys-openmpi" <<'EOF'
+# Toofan: the Open MPI bundled next to this OpenFOAM (usr/openmpi). It is relocatable:
+# the *_PREFIX variables tell Open MPI, PRRTE and PMIx where it is installed now.
+export MPI_ARCH_PATH="$(cd "$WM_PROJECT_DIR/../openmpi" && pwd -P)"
+export OPAL_PREFIX="$MPI_ARCH_PATH" PRTE_PREFIX="$MPI_ARCH_PATH" PMIX_PREFIX="$MPI_ARCH_PATH"
+EOF
+
+log "Copying Open MPI from $OPENMPI_DIR"
+mkdir -p "$MPI_DEST/bin" "$MPI_DEST/lib"
+for program in "${OPENMPI_PROGRAMS[@]}"; do
+    [ -e "$OPENMPI_DIR/bin/$program" ] || die "Open MPI program not found: $program"
+    cp -a "$OPENMPI_DIR/bin/$program" "$MPI_DEST/bin/"
+done
+cp -a "$OPENMPI_DIR"/lib/*.so* "$MPI_DEST/lib/"
+# Help texts and default parameter files; licenses go to usr/share/licenses below.
+cp -a "$OPENMPI_DIR/etc" "$MPI_DEST/"
+mkdir -p "$MPI_DEST/share"
+for d in openmpi prte pmix; do
+    [ -d "$OPENMPI_DIR/share/$d" ] && cp -a "$OPENMPI_DIR/share/$d" "$MPI_DEST/share/"
+done
+rm -f "$MPI_DEST"/share/*/*-wrapper-data.txt "$MPI_DEST"/share/*/*.pc
 
 # ---------------------------------------------------------------------------------------------
 # 5. Shared libraries
@@ -267,12 +294,17 @@ mapfile -t app_elves < <(find "$USR/bin" "$USR/plugins" "$USR/qml" -type f \( -n
 bundle_deps "$LIBDIR" "$APPDIR" "${app_elves[@]}"
 info "$(find "$LIBDIR" -maxdepth 1 -type f | wc -l) libraries in usr/lib"
 
-log "Collecting host libraries OpenFOAM needs"
+log "Collecting host libraries Open MPI and OpenFOAM need"
+mapfile -t mpi_own_libs < <(ls "$MPI_DEST/lib")
+mapfile -t mpi_elves < <(find "$MPI_DEST" -type f | while read -r f; do is_elf "$f" && echo "$f"; done)
+LD_LIBRARY_PATH="$MPI_DEST/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    bundle_deps "$MPI_DEST/lib" "$MPI_DEST" "${mpi_elves[@]}"
 mapfile -t of_own_libs < <(ls "$OF_LIB")
 mapfile -t of_elves < <(find "$OF_DEST/$OF_PLATFORM" -type f | while read -r f; do is_elf "$f" && echo "$f"; done)
-# Resolve OpenFOAM's own libraries from the bundle, as its bashrc will at run time.
-LD_LIBRARY_PATH="$OF_LIB/dummy:$OF_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-    bundle_deps "$OF_LIB" "$OF_DEST" "${of_elves[@]}"
+# Resolve OpenFOAM's own libraries and Open MPI from the bundle, as its bashrc (sys-openmpi)
+# will at run time.
+LD_LIBRARY_PATH="$OF_LIB/sys-openmpi:$OF_LIB:$OF_LIB/dummy:$MPI_DEST/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    bundle_deps "$OF_LIB" "$USR" "${of_elves[@]}"
 
 log "Stripping and setting RPATHs"
 # Application side: everything (VTK may be a debug build). OpenFOAM side: only the host
@@ -281,7 +313,18 @@ while read -r f; do
     is_elf "$f" || continue
     strip --strip-unneeded "$f"
     set_runpath "$f" "$LIBDIR"
-done < <(find "$USR" -path "$OF_DEST" -prune -o -type f \( -name '*.so*' -o -perm -u+x \) -print)
+done < <(find "$USR" \( -path "$OF_DEST" -o -path "$MPI_DEST" \) -prune -o -type f \( -name '*.so*' -o -perm -u+x \) -print)
+# Open MPI: built for its original prefix, so all its files get bundle-relative RPATHs.
+while read -r f; do
+    is_elf "$f" || continue
+    strip --strip-unneeded "$f"
+    set_runpath "$f" "$MPI_DEST/lib"
+done < <(find "$MPI_DEST" -type f)
+declare -A mpi_own=()
+for lib in "${mpi_own_libs[@]}"; do mpi_own[$lib]=1; done
+for f in "$MPI_DEST"/lib/*; do
+    [ -f "$f" ] && [ -z "${mpi_own[$(basename "$f")]:-}" ] && info "Open MPI needs host library: $(basename "$f")"
+done
 declare -A of_own=()
 for lib in "${of_own_libs[@]}"; do of_own[$lib]=1; done
 for f in "$OF_LIB"/*; do
@@ -314,12 +357,13 @@ Terminal=false
 EOF
 mkdir -p "$USR/share/applications" "$USR/share/icons/hicolor/scalable/apps"
 cp "$APPDIR/$PKG_NAME.desktop" "$USR/share/applications/"
-cp "$ROOT/assets/toofan-cfd-icon.svg" "$APPDIR/$PKG_NAME.svg"
-cp "$ROOT/assets/toofan-cfd-icon.svg" "$USR/share/icons/hicolor/scalable/apps/$PKG_NAME.svg"
+cp "$ROOT/assets/toofan-icon.svg" "$APPDIR/$PKG_NAME.svg"
+cp "$ROOT/assets/toofan-icon.svg" "$USR/share/icons/hicolor/scalable/apps/$PKG_NAME.svg"
 ln -sf "$PKG_NAME.svg" "$APPDIR/.DirIcon"
 
 licenses="$USR/share/licenses"
-mkdir -p "$licenses"/{OpenFOAM,Qt,VTK,inja,nlohmann-json}
+mkdir -p "$licenses"/{OpenFOAM,OpenMPI,Qt,VTK,inja,nlohmann-json}
+cp "$OPENMPI_DIR/share/licenses/openmpi/LICENSE" "$licenses/OpenMPI/"
 of_package="$(dpkg -S "$OPENFOAM_DIR/etc/bashrc" 2>/dev/null | cut -d: -f1 || true)"
 [ -n "$of_package" ] && cp "/usr/share/doc/$of_package/copyright" "$licenses/OpenFOAM/" 2>/dev/null || true
 cp "$OPENFOAM_DIR/META-INFO/api-info" "$OPENFOAM_DIR/META-INFO/build-info" "$licenses/OpenFOAM/" 2>/dev/null || true
@@ -338,11 +382,13 @@ $APP_NAME $VERSION bundles third-party software under its own licenses:
       Source: https://develop.openfoam.com/Development/openfoam
   Qt $("$QTPATHS" --query QT_VERSION)                              LGPL-3.0 (Qt open source)
       Source: https://download.qt.io/official_releases/qt/
+  Open MPI $OPENMPI_VERSION (with PMIx, PRRTE, hwloc, libevent)  BSD-3-Clause   usr/openmpi
+      Source: https://www.open-mpi.org/software/ompi/
   VTK                                    BSD-3-Clause
   inja, nlohmann/json                    MIT
 
 Each directory here holds the license or copyright file of the corresponding component.
-Other libraries in usr/lib and usr/openfoam come from the build system's distribution packages.
+Other libraries in usr/lib, usr/openfoam and usr/openmpi come from the build system's distribution packages.
 EOF
 
 # ---------------------------------------------------------------------------------------------
@@ -361,23 +407,45 @@ done < <(find "$USR" -path "$OF_DEST" -prune -o -type f \( -name '*.so*' -o -per
 [ "$problems" -eq 0 ] || die "application libraries resolve outside the bundle"
 info "application: all libraries resolve inside the bundle or to host system libraries${LD_LIBRARY_PATH:+ (also with LD_LIBRARY_PATH=$LD_LIBRARY_PATH)}"
 
+# A tiny case (a cube of 8 cells) meshed and decomposed in two, checked by 2 MPI processes.
+testcase="$WORK/mpi-test"
+mkdir -p "$testcase/system"
+header() { printf 'FoamFile { version 2.0; format ascii; class dictionary; object %s; }\n' "$1"; }
+{ header controlDict; echo 'application checkMesh; startFrom startTime; startTime 0; stopAt endTime; endTime 1; deltaT 1; writeControl timeStep; writeInterval 1;'; } >"$testcase/system/controlDict"
+{ header fvSchemes; echo 'ddtSchemes {} gradSchemes {} divSchemes {} laplacianSchemes {} interpolationSchemes {} snGradSchemes {}'; } >"$testcase/system/fvSchemes"
+{ header fvSolution; } >"$testcase/system/fvSolution"
+{ header decomposeParDict; echo 'numberOfSubdomains 2; method scotch;'; } >"$testcase/system/decomposeParDict"
+{ header blockMeshDict; echo 'vertices ((0 0 0) (1 0 0) (1 1 0) (0 1 0) (0 0 1) (1 0 1) (1 1 1) (0 1 1));
+  blocks (hex (0 1 2 3 4 5 6 7) (2 2 2) simpleGrading (1 1 1));
+  boundary (walls { type wall; faces ((0 3 2 1) (4 5 6 7) (0 4 7 3) (1 2 6 5) (0 1 5 4) (3 7 6 2)); });'; } >"$testcase/system/blockMeshDict"
+
 of_check="$(env -i HOME="$HOME" PATH=/usr/bin:/bin HOST="$(sed 's/^\^//' <<<"$HOST_LIBS_RE")" bash -c '
-    of="$1"; programs=("${@:2}"); set --   # bashrc must not see positional parameters
+    usr="$1" case="$2"; programs=("${@:3}"); set --   # bashrc must not see positional parameters
+    of="$usr/openfoam"
     source "$of/etc/bashrc" >/dev/null 2>&1
     [ "$WM_PROJECT_DIR" = "$(cd "$of" && pwd -P)" ] || { echo "WM_PROJECT_DIR is $WM_PROJECT_DIR"; exit 1; }
-    [ "$FOAM_MPI" = dummy ] || { echo "FOAM_MPI is $FOAM_MPI"; exit 1; }
-    for program in "${programs[@]}"; do
+    [ "$FOAM_MPI" = sys-openmpi ] || { echo "FOAM_MPI is $FOAM_MPI"; exit 1; }
+    [ "$OPAL_PREFIX" = "$(cd "$usr/openmpi" && pwd -P)" ] || { echo "OPAL_PREFIX is $OPAL_PREFIX"; exit 1; }
+    for program in "${programs[@]}" mpirun; do
         path="$(command -v "$program")" || { echo "$program not on PATH"; exit 1; }
-        [[ "$path" == "$of"/* ]] || { echo "$program resolves to $path"; exit 1; }
+        [[ "$path" == "$usr"/* ]] || { echo "$program resolves to $path"; exit 1; }
+        [ "$program" = mpirun ] && continue
         out="$(ldd "$path")"
         if grep -q "not found" <<<"$out"; then echo "$program: $(grep "not found" <<<"$out" | head -3)"; exit 1; fi
-        outside="$(awk -v of="$of" "\$2 == \"=>\" && index(\$3, of \"/\") != 1 { print \$1 }" <<<"$out" | grep -vE "^($HOST)" || true)"
+        outside="$(awk -v usr="$usr" "\$2 == \"=>\" && index(\$3, usr \"/\") != 1 { print \$1 }" <<<"$out" | grep -vE "^($HOST)" || true)"
         [ -z "$outside" ] || { echo "$program loads from outside the bundle: $outside"; exit 1; }
     done
-    blockMesh -help >/dev/null || { echo "blockMesh -help failed"; exit 1; }
-    echo ok' _ "$OF_DEST" "${OPENFOAM_PROGRAMS[@]}" 2>&1)"
+    cd "$case"
+    blockMesh >log.blockMesh 2>&1 || { echo "blockMesh failed:"; tail -20 log.blockMesh; exit 1; }
+    decomposePar >log.decomposePar 2>&1 || { echo "decomposePar failed:"; tail -20 log.decomposePar; exit 1; }
+    # Build machines and containers may run this as root, which Open MPI refuses by default.
+    export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+    mpirun --oversubscribe -np 2 checkMesh -parallel >log.checkMesh 2>&1 || { echo "parallel checkMesh failed:"; tail -20 log.checkMesh; exit 1; }
+    grep -q "^nProcs *: *2" log.checkMesh || { echo "checkMesh did not run on 2 processes"; exit 1; }
+    echo ok' _ "$USR" "$testcase" "${OPENFOAM_PROGRAMS[@]}" 2>&1)"
 [ "$of_check" = "ok" ] || die "bundled OpenFOAM check failed: $of_check"
-info "OpenFOAM: relocatable environment, no MPI, programs run from the bundle"
+info "OpenFOAM: relocatable environment, programs run from the bundle, parallel run with the bundled Open MPI"
+rm -rf "$testcase"
 info "bundle size: $(du -sh "$APPDIR" | cut -f1)"
 
 # ---------------------------------------------------------------------------------------------
@@ -389,7 +457,7 @@ APPIMAGE="$OUT_DIR/$PKG_NAME-$VERSION-$ARCH.AppImage"
 if [ "$MAKE_TAR" -eq 1 ]; then
     log "Creating $(basename "$TARBALL")"
     top="$PKG_NAME-$VERSION"
-    ln -sf AppRun "$APPDIR/$PKG_NAME"       # ./toofan-cfd starts the unpacked app
+    ln -sf AppRun "$APPDIR/$PKG_NAME"       # ./toofan starts the unpacked app
     tar -C "$WORK" --owner=0 --group=0 --transform "s,^AppDir,$top," -czf "$TARBALL" AppDir
     rm -f "$APPDIR/$PKG_NAME"
     info "$(du -h "$TARBALL" | cut -f1)  $TARBALL"

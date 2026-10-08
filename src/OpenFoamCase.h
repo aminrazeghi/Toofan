@@ -20,6 +20,7 @@ struct CaseOptions {
     double maxCourant = 0.0;             // 0: 2 incompressible, 1 compressible
     int writeCount = 60;
     int surfaceLayers = 3;
+    int processors = 1;                  // > 1: decomposed for a parallel (MPI) run
     // Model orientation, degrees: about x, then y, then z (fixed axes), around the model's centre.
     std::array<double, 3> rotation{0.0, 0.0, 0.0};
 };

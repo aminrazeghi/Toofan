@@ -29,7 +29,7 @@ const ColorMap &colorMapNamed(const QString &name)
 }
 }
 
-#ifdef WINDTUNNEL_HAS_VTK
+#ifdef TOOFAN_HAS_VTK
 #include <vtkActor.h>
 #include <vtkArrowSource.h>
 #include <vtkAxesActor.h>
@@ -51,6 +51,8 @@ const ColorMap &colorMapNamed(const QString &name)
 #include <vtkObjectFactory.h>
 #include <vtkOutlineSource.h>
 #include <vtkOpenFOAMReader.h>
+#include <vtkPOpenFOAMReader.h>
+#include <vtkStaticCleanUnstructuredGrid.h>
 #include <vtkPlane.h>
 #include <vtkPlaneSource.h>
 #include <vtkPointData.h>
@@ -148,6 +150,18 @@ vtkSmartPointer<vtkPolyData> appendOutput(vtkAppendPolyData *append)
     return output;
 }
 
+// Newest numeric (time) directory in dir, or -1 when there is none.
+double latestTime(const QDir &dir)
+{
+    double latest = -1;
+    for (const QString &name : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        bool ok = false;
+        const double time = name.toDouble(&ok);
+        if (ok) latest = std::max(latest, time);
+    }
+    return latest;
+}
+
 // Reads the case mesh and the saved time step closest to wantedTime (NaN: the latest).
 // Thread-safe: touches no shared state.
 std::shared_ptr<const CaseData> loadCaseData(const QString &casePath, double wantedTime)
@@ -160,7 +174,18 @@ std::shared_ptr<const CaseData> loadCaseData(const QString &casePath, double wan
     if (QFile touch(foamFile); !touch.exists() && !touch.open(QIODevice::WriteOnly))
         return nullptr;
 
-    vtkNew<vtkOpenFOAMReader> reader;
+    // A parallel run writes its time steps into processor*/ until reconstructPar has run; read
+    // those (all processors in this one process) while they are newer than the case's own.
+    const bool decomposed = QFileInfo(caseDir.filePath(QStringLiteral("processor0"))).isDir() &&
+                            latestTime(QDir(caseDir.filePath(QStringLiteral("processor0")))) > latestTime(caseDir);
+    vtkSmartPointer<vtkOpenFOAMReader> reader;
+    if (decomposed) {
+        auto parallelReader = vtkSmartPointer<vtkPOpenFOAMReader>::New();
+        parallelReader->SetCaseType(vtkPOpenFOAMReader::DECOMPOSED_CASE);
+        reader = parallelReader;
+    } else {
+        reader = vtkSmartPointer<vtkOpenFOAMReader>::New();
+    }
     reader->SetFileName(QFile::encodeName(foamFile).constData());
     reader->UpdateInformation();
     reader->DisableAllCellArrays();
@@ -202,6 +227,14 @@ std::shared_ptr<const CaseData> loadCaseData(const QString &casePath, double wan
     }
     if (!data->mesh || data->mesh->GetNumberOfCells() == 0)
         return nullptr;
+    if (decomposed) {
+        // Points on processor boundaries come once per processor; merge them so cells stay
+        // connected across the boundaries (streamlines would stop there otherwise).
+        vtkNew<vtkStaticCleanUnstructuredGrid> merge;
+        merge->SetInputData(data->mesh);
+        merge->Update();
+        data->mesh = merge->GetOutput();
+    }
     data->cells = data->mesh->GetNumberOfCells();
     data->model = appendOutput(model);
     data->tunnel = appendOutput(tunnel);
@@ -719,7 +752,7 @@ struct CasePreview {};
 #endif
 
 VtkView::VtkView(QQuickItem *parent)
-#ifdef WINDTUNNEL_HAS_VTK
+#ifdef TOOFAN_HAS_VTK
     : QQuickVTKItem(parent)
 #else
     : QQuickItem(parent)
@@ -887,7 +920,7 @@ void VtkView::setLoading(bool loading)
 
 void VtkView::startJob()
 {
-#ifdef WINDTUNNEL_HAS_VTK
+#ifdef TOOFAN_HAS_VTK
     const bool reread = m_rereadPending || !m_data;
     m_jobPending = m_rereadPending = false;
     setLoading(true);
@@ -907,7 +940,7 @@ void VtkView::startJob()
 
 void VtkView::applyJobResult(int generation, std::shared_ptr<const CaseData> data, std::shared_ptr<const CasePreview> preview)
 {
-#ifdef WINDTUNNEL_HAS_VTK
+#ifdef TOOFAN_HAS_VTK
     if (generation == m_loadGeneration && data) { // a failed read keeps the previous picture
         m_data = data;
         setTimes(data->times);
@@ -930,7 +963,7 @@ void VtkView::applyJobResult(int generation, std::shared_ptr<const CaseData> dat
 
 void VtkView::updateScene()
 {
-#ifdef WINDTUNNEL_HAS_VTK
+#ifdef TOOFAN_HAS_VTK
     dispatch_async([state = SceneState{m_stlFile, m_modelRotation, m_viewInsets, size(), m_preview, m_colorMap, m_darkTheme}](vtkRenderWindow *, vtkUserData userData) {
         if (auto scene = PreviewScene::SafeDownCast(userData))
             syncScene(scene, state);

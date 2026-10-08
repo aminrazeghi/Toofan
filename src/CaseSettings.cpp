@@ -1,5 +1,12 @@
 #include "CaseSettings.h"
 #include "OpenFoamCase.h"
+#include <QThread>
+#include <algorithm>
+
+int CaseSettings::defaultProcessors()
+{
+    return std::clamp(QThread::idealThreadCount() / 2, 1, 8);
+}
 
 void CaseSettings::restoreDefaults()
 {
@@ -16,6 +23,7 @@ void CaseSettings::restoreDefaults()
     maxCourant = defaults.maxCourant;
     writeCount = defaults.writeCount;
     surfaceLayers = defaults.surfaceLayers;
+    processors = defaults.processors;
     emit changed();
 }
 
@@ -33,4 +41,5 @@ void CaseSettings::apply(CaseOptions *options) const
     options->maxCourant = maxCourant;
     options->writeCount = writeCount;
     options->surfaceLayers = surfaceLayers;
+    options->processors = std::max(processors, 1);
 }

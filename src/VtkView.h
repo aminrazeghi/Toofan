@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef WINDTUNNEL_HAS_VTK
+#ifdef TOOFAN_HAS_VTK
 #include <QQuickVTKItem.h>
 class vtkRenderWindow;
 #else
@@ -18,7 +18,7 @@ class vtkRenderWindow;
 struct CaseData;
 struct CasePreview;
 
-#ifdef WINDTUNNEL_HAS_VTK
+#ifdef TOOFAN_HAS_VTK
 class VtkView : public QQuickVTKItem
 #else
 class VtkView : public QQuickItem
@@ -82,7 +82,7 @@ public:
     QString previewInfo() const { return m_previewInfo; }
     bool loading() const { return m_loading; }
 
-#ifdef WINDTUNNEL_HAS_VTK
+#ifdef TOOFAN_HAS_VTK
     static void setGraphicsApi();
     vtkUserData initializeVTK(vtkRenderWindow *renderWindow) override;
 #else

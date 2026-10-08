@@ -1,4 +1,4 @@
-"""Generates the Toofan CFD icon and logo (toofan-cfd-icon.svg, toofan-cfd-logo.svg).
+"""Generates the Toofan icon and logo (toofan-icon.svg, toofan-logo.svg).
 
 The mark is exact potential flow, with Kutta circulation, around a Joukowski airfoil:
 the streamlines are traced through the analytic velocity field, so they bend the way
@@ -126,13 +126,13 @@ def mark():
     return out
 
 ICON = f'''<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img">
-  <title>Toofan CFD</title>
+  <title>Toofan</title>
 {mark()}</svg>
 '''
 
 FONT = "'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
 LOGO = f'''<svg xmlns="http://www.w3.org/2000/svg" width="680" height="300" viewBox="0 0 680 300" role="img">
-  <title>Toofan CFD</title>
+  <title>Toofan</title>
   <g transform="translate(60 60) scale({180 / 512})">
 {mark()}  </g>
   <text x="276" y="160" font-family="{FONT}" font-size="68" font-weight="600" letter-spacing="-1" fill="#0B1F3A">Toofan</text>
@@ -144,5 +144,5 @@ LOGO = f'''<svg xmlns="http://www.w3.org/2000/svg" width="680" height="300" view
 
 if __name__ == "__main__":
     out_dir = sys.argv[1] if len(sys.argv) > 1 else "."
-    with open(f"{out_dir}/toofan-cfd-icon.svg", "w") as f: f.write(ICON)
-    with open(f"{out_dir}/toofan-cfd-logo.svg", "w") as f: f.write(LOGO)
+    with open(f"{out_dir}/toofan-icon.svg", "w") as f: f.write(ICON)
+    with open(f"{out_dir}/toofan-logo.svg", "w") as f: f.write(LOGO)

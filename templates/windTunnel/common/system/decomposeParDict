@@ -1,0 +1,17 @@
+{% if parallel.enabled %}{% include "banner" %}
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      decomposeParDict;
+}
+
+// Parallel run on {{ parallel.processors }} MPI processes. scotch balances the cell counts
+// without geometric input; snappyHexMesh also uses it to rebalance during refinement.
+numberOfSubdomains  {{ parallel.processors }};
+
+method              {{ parallel.method }};
+
+// ************************************************************************* //
+{% endif %}

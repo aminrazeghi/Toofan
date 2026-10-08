@@ -26,10 +26,15 @@ class CaseSettings : public QObject {
     Q_PROPERTY(double maxCourant MEMBER maxCourant NOTIFY changed)     // 0: automatic per solver
     Q_PROPERTY(int writeCount MEMBER writeCount NOTIFY changed)        // result time steps written per run
     Q_PROPERTY(int surfaceLayers MEMBER surfaceLayers NOTIFY changed)  // prism layers on the model, 0 = none
+    // Parallel run: MPI processes for snappyHexMesh and the solver (1 = serial).
+    Q_PROPERTY(int processors MEMBER processors NOTIFY changed)
 
 public:
     using QObject::QObject;
     Q_INVOKABLE void restoreDefaults();
+    // Half the hardware threads (about the physical cores), at most 8: past that a wind tunnel
+    // mesh of this size gains little.
+    static int defaultProcessors();
     void apply(CaseOptions *options) const;
 
     QString turbulenceModel = QStringLiteral("kOmegaSST");
@@ -44,6 +49,7 @@ public:
     double maxCourant = 0.0;
     int writeCount = 60;
     int surfaceLayers = 3;
+    int processors = defaultProcessors();
 
 signals:
     void changed();

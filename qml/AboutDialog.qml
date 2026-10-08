@@ -8,7 +8,7 @@ Popup {
     property var info: ({})   // appInfo from main.cpp: Qt and VTK versions
     readonly property string version: "0.1.0"
     readonly property string author: "amin razeghiyadaki"
-    readonly property string repositoryUrl: "www.github.com/mnrzghi/somehting.git"   // empty: shown as "Not set yet"
+    readonly property string repositoryUrl: "https://github.com/aminrazeghi/Toofan"
 
     modal: true
     focus: true
@@ -49,7 +49,7 @@ Popup {
             Image {
                 id: logo
                 anchors.centerIn: parent
-                source: "qrc:/assets/toofan-cfd-logo.svg"
+                source: "qrc:/assets/toofan-logo.svg"
                 width: parent.width - 24
                 height: width * 300 / 680
                 sourceSize: Qt.size(width * 2, height * 2) // render the SVG sharp on high-DPI screens

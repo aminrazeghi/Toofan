@@ -29,6 +29,7 @@ Fields are written to `0.orig/`; the run copies them to `0/` after meshing.
 | `mesh.*` | snappyHexMesh refinement levels, refinement box, `locationInMesh`, cell limits, layers |
 | `time.endTime`, `time.deltaT`, `time.writeInterval`, `time.maxCo` | Run control |
 | `forces.CofR`, `forces.lRef`, `forces.Aref` | Force-coefficient reference values |
+| `parallel.enabled`, `parallel.processors`, `parallel.method` | MPI decomposition; `system/decomposeParDict` is only written when enabled |
 
 The `vec(array)` callback formats a 3-element array as an OpenFOAM vector
 `(x y z)`.

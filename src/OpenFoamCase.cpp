@@ -18,7 +18,8 @@ namespace {
 using json = nlohmann::json;
 
 const QString kTemplateRoot = QStringLiteral(":/templates/windTunnel");
-const QString kCaseMarker = QStringLiteral(".windtunnel-case");
+const QString kCaseMarker = QStringLiteral(".toofan-case");
+const QString kLegacyCaseMarker = QStringLiteral(".windtunnel-case"); // cases from before the rename
 constexpr double kMolWeight = 28.96;  // air, kg/kmol
 constexpr double kGamma = 1.4;
 
@@ -256,6 +257,9 @@ json buildTemplateData(const CaseOptions &options, const QString &solver, const 
         {"writeInterval", round6(endTime / std::max(options.writeCount, 1))},
         {"maxCo", round6(maxCo)},
     };
+    data["parallel"] = {
+        {"enabled", options.processors > 1}, {"processors", std::max(options.processors, 1)}, {"method", "scotch"},
+    };
     data["forces"] = {
         {"CofR", vec(model.center(0), model.center(1), model.center(2))},
         {"lRef", round6(lRef)},
@@ -340,8 +344,8 @@ bool renderTemplates(const json &data, const QString &solver, const QDir &root, 
 bool resetCaseDirectory(const QDir &root, QString *error)
 {
     if (root.exists() && !root.isEmpty(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden) &&
-        !QFileInfo::exists(root.filePath(kCaseMarker))) {
-        *error = QStringLiteral("%1 already exists and was not created by Digital Wind Tunnel; refusing to overwrite it.").arg(root.path());
+        !QFileInfo::exists(root.filePath(kCaseMarker)) && !QFileInfo::exists(root.filePath(kLegacyCaseMarker))) {
+        *error = QStringLiteral("%1 already exists and was not created by Toofan; refusing to overwrite it.").arg(root.path());
         return false;
     }
     const QStringList generated{QStringLiteral("0"), QStringLiteral("0.orig"), QStringLiteral("constant"),
@@ -363,6 +367,7 @@ bool resetCaseDirectory(const QDir &root, QString *error)
         *error = QStringLiteral("Cannot write %1: %2").arg(foamFile.fileName(), foamFile.errorString());
         return false;
     }
+    QFile::remove(root.filePath(kLegacyCaseMarker));
     QFile marker(root.filePath(kCaseMarker));
     if (!marker.open(QIODevice::WriteOnly)) {
         *error = QStringLiteral("Cannot write %1: %2").arg(marker.fileName(), marker.errorString());

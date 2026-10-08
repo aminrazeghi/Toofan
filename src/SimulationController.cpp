@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QThread>
 #include <QUrl>
 
 SimulationController::SimulationController(QObject *parent) : QObject(parent), m_caseRoot(OpenFoamCase::defaultCaseRoot())
@@ -25,6 +26,7 @@ SimulationController::SimulationController(QObject *parent) : QObject(parent), m
             if (QFileInfo::exists(candidate)) { m_openFoamBashrc = candidate; break; }
         }
     }
+    probeParallel();
     // Merge stderr into stdout so each step's log file keeps the original interleaving.
     m_process.setProcessChannelMode(QProcess::MergedChannels);
     connect(&m_settings, &CaseSettings::changed, this, &SimulationController::updateSolver);
@@ -59,11 +61,40 @@ SimulationController::SimulationController(QObject *parent) : QObject(parent), m
             m_status = QStringLiteral("Failed"); emit statusChanged(); return;
         }
         finishStep(QStringLiteral("%1 finished.").arg(name));
-        if (name == QStringLiteral("blockMesh") || name == QStringLiteral("snappyHexMesh"))
+        if (m_steps[m_step].refreshPreview)
             setPreviewRevision(m_previewRevision + 1);
         ++m_step;
         runNextStep();
     });
+}
+
+int SimulationController::maxProcessors() { return std::max(QThread::idealThreadCount(), 1); }
+
+QStringList SimulationController::bashCommand(const QStringList &command) const
+{
+    // OpenFOAM's bashrc sets WM_PROJECT_DIR, FOAM_* paths, and library paths.
+    // Run each utility in a fresh sourced shell so the GUI itself need not be launched from one.
+    // The bashrc treats positional parameters as config settings, so clear them before sourcing.
+    return QStringList{QStringLiteral("-c"),
+                       QStringLiteral("rc=\"$1\"; shift; cmd=(\"$@\"); set --; source \"$rc\" >/dev/null && exec \"${cmd[@]}\""),
+                       QStringLiteral("toofan"), m_openFoamBashrc} + command;
+}
+
+void SimulationController::probeParallel()
+{
+    if (m_openFoamBashrc.isEmpty()) return;
+    // Parallel runs need an MPI-enabled OpenFOAM (not the "dummy" Pstream) and its mpirun.
+    auto *probe = new QProcess(this);
+    connect(probe, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this, probe](int code, QProcess::ExitStatus status) {
+        const QString mpi = QString::fromLocal8Bit(probe->readAllStandardOutput()).trimmed();
+        if (status == QProcess::NormalExit && code == 0 && !mpi.isEmpty()) {
+            m_parallelAvailable = true; m_mpiName = mpi; emit parallelAvailableChanged();
+        }
+        probe->deleteLater();
+    });
+    probe->start(QStringLiteral("/bin/bash"),
+                 bashCommand({QStringLiteral("bash"), QStringLiteral("-c"),
+                              QStringLiteral("[ -n \"$FOAM_MPI\" ] && [ \"$FOAM_MPI\" != dummy ] && command -v mpirun >/dev/null && echo \"$FOAM_MPI\"")}));
 }
 
 void SimulationController::setStlPath(const QString &path)
@@ -121,6 +152,7 @@ void SimulationController::newProject()
     setMeshQuality(QString::fromLatin1(kDefaultMeshQuality));
     m_settings.restoreDefaults();
     m_casePath.clear(); emit casePathChanged();
+    m_runProcessors = 1;
     setPreviewRevision(0);
     m_previewTime = 0.0;
     resetMonitors();
@@ -154,15 +186,42 @@ void SimulationController::startSimulation()
     CaseOptions options{m_stlPath, m_casePath, m_meshQuality, m_speed};
     m_settings.apply(&options);
     options.rotation = {m_modelRotation.x(), m_modelRotation.y(), m_modelRotation.z()};
+    QString note;
+    if (options.processors > 1 && !m_parallelAvailable) {
+        note = QStringLiteral("This OpenFOAM environment has no MPI; running on 1 processor.");
+        options.processors = 1;
+    }
     if (!OpenFoamCase::prepare(options, &message)) {
         m_status = QStringLiteral("Needs attention"); emit statusChanged(); appendLog(message); return;
     }
+    if (!note.isEmpty()) message += QLatin1Char('\n') + note;
+    if (options.processors > 1) message += QStringLiteral("\nParallel run on %1 processors (%2).").arg(options.processors).arg(m_mpiName);
     // Fields are generated in 0.orig and copied after meshing, as snappyHexMesh changes the patches.
-    m_steps = {{QStringLiteral("blockMesh"), {QStringLiteral("blockMesh")}},
-               {QStringLiteral("surfaceFeatureExtract"), {QStringLiteral("surfaceFeatureExtract")}},
-               {QStringLiteral("snappyHexMesh"), {QStringLiteral("snappyHexMesh"), QStringLiteral("-overwrite")}},
-               {QStringLiteral("copyInitialFields"), {QStringLiteral("cp"), QStringLiteral("-r"), QStringLiteral("0.orig"), QStringLiteral("0")}},
-               {m_solver, {m_solver}}};
+    const Step copyFields{QStringLiteral("copyInitialFields"), {QStringLiteral("cp"), QStringLiteral("-r"), QStringLiteral("0.orig"), QStringLiteral("0")}};
+    m_steps = {{QStringLiteral("blockMesh"), {QStringLiteral("blockMesh")}, true},
+               {QStringLiteral("surfaceFeatureExtract"), {QStringLiteral("surfaceFeatureExtract")}}};
+    if (options.processors > 1) {
+        // Mesh in parallel, then reassemble the mesh (for the preview, and so the fields are
+        // decomposed together with it), decompose again with the fields and solve in parallel.
+        // --oversubscribe: allow more processes than physical cores (Open MPI counts cores, not threads).
+        const QStringList mpirun{QStringLiteral("mpirun"), QStringLiteral("--oversubscribe"), QStringLiteral("-np"), QString::number(options.processors)};
+        const QString parallel = QStringLiteral("-parallel");
+        m_steps += {{QStringLiteral("decomposeMesh"), {QStringLiteral("decomposePar"), QStringLiteral("-force")}},
+                    {QStringLiteral("snappyHexMesh"), mpirun + QStringList{QStringLiteral("snappyHexMesh"), QStringLiteral("-overwrite"), parallel}},
+                    {QStringLiteral("reconstructParMesh"), {QStringLiteral("reconstructParMesh"), QStringLiteral("-constant")}, true},
+                    copyFields,
+                    {QStringLiteral("decomposePar"), {QStringLiteral("decomposePar"), QStringLiteral("-force")}},
+                    {m_solver, mpirun + QStringList{m_solver, parallel}},
+                    {QStringLiteral("reconstructPar"), {QStringLiteral("reconstructPar")}, true}};
+        m_resultsPath = QDir(m_casePath).filePath(QStringLiteral("processor0"));
+        m_runProcessors = options.processors;
+    } else {
+        m_steps += {{QStringLiteral("snappyHexMesh"), {QStringLiteral("snappyHexMesh"), QStringLiteral("-overwrite")}, true},
+                    copyFields,
+                    {m_solver, {m_solver}}};
+        m_resultsPath = m_casePath;
+        m_runProcessors = 1;
+    }
     m_step = 0; m_stopRequested = false; resetMonitors(); appendLog(message); runNextStep();
 }
 
@@ -186,14 +245,7 @@ void SimulationController::runNextStep()
     appendLog(QStringLiteral("$ %1").arg(commandLine));
     m_process.setWorkingDirectory(m_casePath);
     watchTimeDirectories(step.name == m_solver);
-    // OpenFOAM's bashrc sets WM_PROJECT_DIR, FOAM_* paths, and library paths.
-    // Run each utility in a fresh sourced shell so the GUI itself need not be launched from one.
-    // The bashrc treats positional parameters as config settings, so clear them before sourcing.
-    QStringList args{QStringLiteral("-c"),
-                     QStringLiteral("rc=\"$1\"; shift; cmd=(\"$@\"); set --; source \"$rc\" >/dev/null && exec \"${cmd[@]}\""),
-                     QStringLiteral("windtunnel"), m_openFoamBashrc};
-    args += step.command;
-    m_process.start(QStringLiteral("/bin/bash"), args);
+    m_process.start(QStringLiteral("/bin/bash"), bashCommand(step.command));
 }
 
 void SimulationController::writeStepLog(const QByteArray &data)
@@ -344,7 +396,7 @@ void SimulationController::watchTimeDirectories(bool enable)
     if (const QStringList watched = m_caseWatcher.directories(); !watched.isEmpty())
         m_caseWatcher.removePaths(watched);
     if (enable)
-        m_caseWatcher.addPath(m_casePath);
+        m_caseWatcher.addPath(m_resultsPath);
 }
 
 namespace {
@@ -364,20 +416,19 @@ QString latestTimeDirectory(const QString &casePath, double *time)
 
 void SimulationController::onCaseDirectoryChanged()
 {
-    // A new time directory appears first and its field files follow; also watch it and wait
-    // until both stay quiet before showing it.
+    // A new time directory appears first and its field files follow: give them a moment before
+    // showing it. Not restarted by later changes, so frequent writes still refresh the preview
+    // about once a second instead of postponing it until the solver stops.
     double time = 0.0;
-    const QString latest = latestTimeDirectory(m_casePath, &time);
+    const QString latest = latestTimeDirectory(m_resultsPath, &time);
     if (latest.isEmpty() || time <= m_previewTime) return;
-    const QString path = QDir(m_casePath).filePath(latest);
-    if (!m_caseWatcher.directories().contains(path)) m_caseWatcher.addPath(path);
-    m_timeStepSettle.start();
+    if (!m_timeStepSettle.isActive()) m_timeStepSettle.start();
 }
 
 void SimulationController::publishLatestTime()
 {
     double time = 0.0;
-    if (latestTimeDirectory(m_casePath, &time).isEmpty() || time <= m_previewTime) return;
+    if (latestTimeDirectory(m_resultsPath, &time).isEmpty() || time <= m_previewTime) return;
     m_previewTime = time;
     setPreviewRevision(m_previewRevision + 1);
 }

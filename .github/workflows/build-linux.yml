@@ -1,4 +1,4 @@
-# Builds the Linux x86_64 packages (AppImage and tar.gz, with Qt, VTK and OpenFOAM bundled)
+# Builds the Linux x86_64 packages (AppImage and tar.gz, with Qt, VTK, OpenFOAM and Open MPI bundled)
 # on every push to main and every pull request, and uploads them as workflow artifacts.
 # Pushing a tag v<version> (matching the version in qml/AboutDialog.qml) also publishes them
 # as a GitHub release.
@@ -22,7 +22,8 @@ env:
   QT_VERSION: "6.10.2"
   VTK_VERSION: "9.6.2"
   OPENFOAM_VERSION: "2606"
-  DEPS_DIR: /home/runner/deps   # Qt and VTK; cached between runs
+  OPENMPI_VERSION: "5.0.10"
+  DEPS_DIR: /home/runner/deps   # Qt, VTK and Open MPI; cached between runs
 
 jobs:
   linux-x86_64:
@@ -43,11 +44,11 @@ jobs:
             exit 1
           fi
 
-      - name: Cache Qt and VTK
+      - name: Cache Qt, VTK and Open MPI
         uses: actions/cache@v4
         with:
           path: ${{ env.DEPS_DIR }}
-          key: deps-ubuntu-24.04-qt${{ env.QT_VERSION }}-vtk${{ env.VTK_VERSION }}-${{ hashFiles('packaging/ci/install-deps.sh') }}
+          key: deps-ubuntu-24.04-qt${{ env.QT_VERSION }}-vtk${{ env.VTK_VERSION }}-ompi${{ env.OPENMPI_VERSION }}-${{ hashFiles('packaging/ci/install-deps.sh', 'packaging/build-openmpi.sh') }}
 
       - name: Install dependencies
         run: packaging/ci/install-deps.sh
@@ -61,7 +62,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: toofan-cfd-linux-x86_64
+          name: toofan-linux-x86_64
           path: |
             dist/*.AppImage
             dist/*.tar.gz
@@ -78,7 +79,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: toofan-cfd-linux-x86_64
+          name: toofan-linux-x86_64
           path: dist
 
       - name: Publish the release
@@ -90,5 +91,5 @@ jobs:
           [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease="--prerelease"
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Toofan CFD ${GITHUB_REF_NAME#v}" \
+            --title "Toofan ${GITHUB_REF_NAME#v}" \
             --generate-notes --verify-tag $prerelease

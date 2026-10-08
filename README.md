@@ -1,4 +1,4 @@
-# Toofan CFD
+# Toofan
 
 A desktop virtual wind tunnel built with Qt 6 / QML, VTK and OpenFOAM. Import an
 STL model, choose the inlet speed and mesh resolution, and the app builds an
@@ -17,9 +17,14 @@ develops.
 - **Workflow**: `blockMesh` → `surfaceFeatureExtract` → `snappyHexMesh` →
   solver. Each step writes its own log (`blockMesh.log`, `pimpleFoam.log`, …)
   into the case directory, and the output streams into the built-in console.
+- **Parallel runs**: with more than one processor (Advanced settings, default
+  half the hardware threads, at most 8), the case is decomposed with scotch,
+  `snappyHexMesh` and the solver run under `mpirun`, and the mesh and results
+  are reconstructed afterwards. The 3D view follows the solver while it writes
+  into `processor*/`. Needs an OpenFOAM with Open MPI (the packages bundle one).
 - **Advanced settings**: turbulence model (k-ω SST, k-ε, realizable k-ε,
   Spalart-Allmaras, laminar), inlet turbulence, fluid properties, run length,
-  Courant limit, write count and surface layers.
+  Courant limit, write count, surface layers and processor count.
 - **Live monitoring**: drag and lift coefficients and solver residuals are
   plotted while the solver runs.
 - **3D results** (VTK): full domain, mid-plane slice or streamlines, colored by
@@ -47,7 +52,7 @@ inja is included as a git submodule:
 git submodule update --init --recursive
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/digital-wind-tunnel
+./build/toofan
 ```
 
 VTK is found through CMake's normal package search (e.g. under `/usr`). For a
@@ -64,7 +69,7 @@ order:
 2. a copy bundled with the app (`<app>/../openfoam/etc/bashrc`)
 3. the newest `/usr/lib/openfoam/openfoam*/etc/bashrc`
 
-Cases are written to `~/wind-tunnel/<model name>`; the directory is created if
+Cases are written to `~/Toofan-Projects/<model name>`; the directory is created if
 it is missing. Re-running a model regenerates its case and removes previous
 meshes and results. The templates live in `templates/windTunnel`; see its
 README.
@@ -76,9 +81,14 @@ packaging/package-linux.sh            # Release build, AppImage and tar.gz in di
 packaging/package-linux.sh --help     # options: --skip-build, --no-appimage, --no-tar, --output DIR
 ```
 
-The packages bundle Qt, VTK and a serial (no MPI) copy of the OpenFOAM programs
-the app uses, so they run without an OpenFOAM install. `OPENFOAM_DIR`,
-`VTK_DIR`, `QTPATHS` and `APPIMAGETOOL` override what is bundled or used. The
+The packages bundle Qt, VTK, the OpenFOAM programs the app uses and Open MPI,
+so they run, in parallel too, without an OpenFOAM or MPI install. Open MPI is
+built from source once (`packaging/build-openmpi.sh`, cached in `dist/.cache`):
+single-node, with PMIx, PRRTE and hwloc built in, relocated through
+`OPAL_PREFIX` by the bundled OpenFOAM's `etc/config.sh/prefs.sys-openmpi`.
+`OPENFOAM_DIR`, `OPENMPI_DIR`, `VTK_DIR`, `QTPATHS` and `APPIMAGETOOL` override
+what is bundled or used; the OpenFOAM to bundle must have the `sys-openmpi`
+Pstream (as OpenCFD's packages do). The
 packages require a glibc at least as new as the build machine's. The bundled
 licenses and source links are in `usr/share/licenses`.
 
@@ -95,4 +105,5 @@ distributor of the OpenFOAM software via www.openfoam.com, and owner of the
 OPENFOAM® and OpenCFD® trademarks. It is not affiliated with OpenCFD Limited,
 the OpenFOAM Foundation or ESI Group. OpenFOAM is used as an external program,
 and when bundled it is distributed unmodified under the GNU GPL v3, apart from
-a relocation patch to its `etc/bashrc`.
+a relocation patch to its `etc/bashrc` and its Open MPI location in
+`etc/config.sh/prefs.sys-openmpi`.

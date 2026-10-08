@@ -8,6 +8,9 @@ ColumnLayout {
     required property var settings   // CaseSettings
     required property string solver  // pimpleFoam or rhoPimpleFoam, chosen from the inlet speed
     readonly property bool compressible: solver !== "pimpleFoam"
+    property bool parallelAvailable: false  // the OpenFOAM environment has MPI
+    property string mpiName
+    property int maxProcessors: 1
     spacing: 10
 
     readonly property var turbulenceModels: [
@@ -118,6 +121,23 @@ ColumnLayout {
         label: "Surface layers"; unit: ""; maximum: 20
         value: root.settings.surfaceLayers
         onEdited: v => root.settings.surfaceLayers = v
+    }
+
+    SectionTitle { text: "PARALLEL" }
+    NumberField {
+        Layout.fillWidth: true; integer: true
+        enabled: root.parallelAvailable
+        opacity: enabled ? 1 : 0.5
+        label: "Processors"; unit: "of " + root.maxProcessors; minimum: 1; maximum: root.maxProcessors
+        value: root.parallelAvailable ? root.settings.processors : 1
+        onEdited: v => root.settings.processors = v
+    }
+    Label {
+        Layout.fillWidth: true
+        text: !root.parallelAvailable ? "No MPI in this OpenFOAM installation; runs use 1 processor."
+            : root.settings.processors > 1 ? "Meshing and solver run with MPI (" + root.mpiName + "); results are reassembled at the end."
+            : "1 = serial run."
+        color: Theme.faint; font.pixelSize: 11; wrapMode: Text.WordWrap
     }
 
     Button {
