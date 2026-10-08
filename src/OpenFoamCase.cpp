@@ -396,7 +396,7 @@ std::array<double, 6> OpenFoamCase::tunnelBounds(const std::array<double, 6> &mo
 
 QString OpenFoamCase::defaultCaseRoot()
 {
-    return QDir::home().filePath(QStringLiteral("wind-tunnel"));
+    return QDir::home().filePath(QStringLiteral("Toofan-Projects"));
 }
 
 bool OpenFoamCase::prepare(const CaseOptions &options, QString *message)

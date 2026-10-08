@@ -68,6 +68,7 @@ const ColorMap &colorMapNamed(const QString &name)
 #include <vtkTubeFilter.h>
 #include <vtkUnstructuredGrid.h>
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 // One time step of the case as read from disk. Only worker jobs touch it (one at a time): VTK
@@ -79,6 +80,7 @@ struct CaseData {
     double modelBounds[6] = {0, -1, 0, -1, 0, -1};
     double domainBounds[6] = {0, -1, 0, -1, 0, -1};
     double time = 0;
+    QList<double> times;  // all saved time steps of the case, ascending
     bool hasFlow = false; // a solved time step (t > 0) with U
     bool compressible = false;
     vtkIdType cells = 0;
@@ -146,8 +148,9 @@ vtkSmartPointer<vtkPolyData> appendOutput(vtkAppendPolyData *append)
     return output;
 }
 
-// Reads the case mesh and its latest time step. Thread-safe: touches no shared state.
-std::shared_ptr<const CaseData> loadCaseData(const QString &casePath)
+// Reads the case mesh and the saved time step closest to wantedTime (NaN: the latest).
+// Thread-safe: touches no shared state.
+std::shared_ptr<const CaseData> loadCaseData(const QString &casePath, double wantedTime)
 {
     const QDir caseDir(casePath);
     if (!QFileInfo::exists(caseDir.filePath(QStringLiteral("constant/polyMesh/faces"))))
@@ -174,7 +177,13 @@ std::shared_ptr<const CaseData> loadCaseData(const QString &casePath)
     auto data = std::make_shared<CaseData>();
     vtkDoubleArray *times = reader->GetTimeValues();
     if (times && times->GetNumberOfTuples() > 0) {
-        data->time = times->GetValue(times->GetNumberOfTuples() - 1);
+        for (vtkIdType i = 0; i < times->GetNumberOfTuples(); ++i)
+            data->times.append(times->GetValue(i));
+        data->time = data->times.last();
+        if (!std::isnan(wantedTime))
+            for (double t : data->times)
+                if (std::abs(t - wantedTime) < std::abs(data->time - wantedTime))
+                    data->time = t;
         reader->UpdateTimeStep(data->time);
     } else {
         reader->Update();
@@ -822,11 +831,37 @@ void VtkView::setField(const QString &field)
     requestCasePreview(false);
 }
 
+void VtkView::setTimeIndex(int index)
+{
+    if (m_timeIndex == index)
+        return;
+    m_timeIndex = index;
+    emit timeIndexChanged();
+    requestCasePreview(true);
+}
+
+void VtkView::setTimes(const QList<double> &times)
+{
+    if (m_times == times)
+        return;
+    m_times = times;
+    emit timesChanged();
+}
+
+QVariantList VtkView::times() const
+{
+    QVariantList list;
+    for (double t : m_times)
+        list.append(t);
+    return list;
+}
+
 void VtkView::resetCasePreview()
 {
     ++m_loadGeneration; // drop any job still in flight
     m_jobPending = m_rereadPending = false;
     m_data.reset();
+    setTimes({});
     m_preview.reset();
     setPreviewInfo({});
     updateScene();
@@ -859,8 +894,9 @@ void VtkView::startJob()
     // Reading and filtering a large mesh takes a while; do it off the GUI and render threads.
     QThreadPool::globalInstance()->start([guard = QPointer<VtkView>(this), casePath = m_casePath,
                                           cached = reread ? std::shared_ptr<const CaseData>() : m_data,
-                                          mode = m_renderMode, field = m_field, generation = m_loadGeneration] {
-        auto data = cached ? cached : loadCaseData(casePath);
+                                          mode = m_renderMode, field = m_field, generation = m_loadGeneration,
+                                          wantedTime = m_timeIndex >= 0 && m_timeIndex < m_times.size() ? m_times[m_timeIndex] : std::nan("")] {
+        auto data = cached ? cached : loadCaseData(casePath, wantedTime);
         auto preview = data ? buildPreview(data, mode, field) : nullptr;
         QMetaObject::invokeMethod(QCoreApplication::instance(), [guard, generation, data, preview] {
             if (guard) guard->applyJobResult(generation, data, preview);
@@ -874,6 +910,7 @@ void VtkView::applyJobResult(int generation, std::shared_ptr<const CaseData> dat
 #ifdef WINDTUNNEL_HAS_VTK
     if (generation == m_loadGeneration && data) { // a failed read keeps the previous picture
         m_data = data;
+        setTimes(data->times);
         if (preview && preview->mode == m_renderMode && preview->field == m_field) {
             m_preview = preview;
             setPreviewInfo(preview->info);

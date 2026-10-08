@@ -1,6 +1,7 @@
 #include "SimulationController.h"
 #include "OpenFoamCase.h"
 #include <QCoreApplication>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
@@ -109,6 +110,36 @@ void SimulationController::appendLog(const QString &line)
     m_log += line + QLatin1Char('\n');
     if (m_log.size() > 16000) m_log = m_log.right(12000);
     emit logChanged();
+}
+
+void SimulationController::newProject()
+{
+    if (m_process.state() != QProcess::NotRunning) return;
+    setStlPath({});
+    resetModelRotation();
+    setSpeed(kDefaultSpeed);
+    setMeshQuality(QString::fromLatin1(kDefaultMeshQuality));
+    m_settings.restoreDefaults();
+    m_casePath.clear(); emit casePathChanged();
+    setPreviewRevision(0);
+    m_previewTime = 0.0;
+    resetMonitors();
+    m_log.clear(); emit logChanged();
+    m_status = QStringLiteral("Ready"); emit statusChanged();
+}
+
+void SimulationController::openCaseFolder()
+{
+    // Before a run, the model's previous case if there is one.
+    QString path = m_casePath;
+    if (path.isEmpty() && !m_stlPath.isEmpty())
+        path = QDir(m_caseRoot).filePath(QFileInfo(m_stlPath).completeBaseName());
+    if (path.isEmpty() || !QFileInfo(path).isDir()) {
+        path = m_caseRoot;
+        QDir().mkpath(path);
+    }
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
+        appendLog(QStringLiteral("Could not open %1 in the file manager.").arg(path));
 }
 
 void SimulationController::startSimulation()

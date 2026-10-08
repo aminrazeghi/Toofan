@@ -7,6 +7,7 @@ class vtkRenderWindow;
 #include <QQuickItem>
 #endif
 
+#include <QList>
 #include <QString>
 #include <QVariantList>
 #include <QVector3D>
@@ -45,6 +46,10 @@ class VtkView : public QQuickItem
     Q_PROPERTY(bool darkTheme READ darkTheme WRITE setDarkTheme NOTIFY darkThemeChanged)
     // One-line description of what is shown, e.g. "Mesh · 76,241 cells".
     Q_PROPERTY(QString previewInfo READ previewInfo NOTIFY previewInfoChanged)
+    // Saved time steps of the case (seconds, ascending), for scrubbing through the results.
+    Q_PROPERTY(QVariantList times READ times NOTIFY timesChanged)
+    // Time step shown, an index into times; -1 follows the latest one.
+    Q_PROPERTY(int timeIndex READ timeIndex WRITE setTimeIndex NOTIFY timeIndexChanged)
     // True while the case is being read or the view rebuilt in the background.
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
 
@@ -71,6 +76,9 @@ public:
     void setDarkTheme(bool dark);
     // [{value, label, colors: ["#rrggbb", ...]}] for palette pickers.
     Q_INVOKABLE QVariantList colorMaps() const;
+    QVariantList times() const;
+    int timeIndex() const { return m_timeIndex; }
+    void setTimeIndex(int index);
     QString previewInfo() const { return m_previewInfo; }
     bool loading() const { return m_loading; }
 
@@ -93,6 +101,8 @@ signals:
     void darkThemeChanged();
     void previewInfoChanged();
     void loadingChanged();
+    void timesChanged();
+    void timeIndexChanged();
 
 private:
     void requestCasePreview(bool reread);
@@ -102,6 +112,7 @@ private:
     void updateScene();
     void setPreviewInfo(const QString &info);
     void setLoading(bool loading);
+    void setTimes(const QList<double> &times);
 
     QString m_stlFile;
     QString m_casePath;
@@ -113,6 +124,8 @@ private:
     QString m_colorMap = QStringLiteral("viridis");
     bool m_darkTheme = true;
     QString m_previewInfo;
+    QList<double> m_times;
+    int m_timeIndex = -1;
     // GUI thread state. Background jobs read the case (when m_rereadPending) and build the
     // preview for the current mode and field from the cached data.
     std::shared_ptr<const CaseData> m_data;       // latest case read from disk

@@ -157,7 +157,14 @@ ApplicationWindow {
                                     edge + brandBar.height + gap,
                                     edge + sideWidth + gap,
                                     edge + (consolePanel.expanded ? 170 : 40) + gap
-                                        + (plotPanel.shown ? plotPanel.height + gap : 0))
+                                        + (plotPanel.shown ? plotPanel.height + gap : 0)
+                                        + (timeline.shown ? timeline.height + gap : 0))
+            // A new run or case shows (and follows) the latest time step again.
+            onCasePathChanged: timeIndex = -1
+            Connections {
+                target: simulation
+                function onRunningChanged() { if (simulation.running) vtkView.timeIndex = -1 }
+            }
         }
 
         Column {
@@ -447,6 +454,73 @@ ApplicationWindow {
                 onActivated: value => vtkView.field = value
                 // Fall back to U when the selected field no longer exists (other model or solver).
                 onOptionsChanged: if (!options.some(o => o.value === vtkView.field)) vtkView.field = "U"
+            }
+        }
+
+        // ---- Playback of the saved time steps, once the solver has stopped ----
+        FloatingPanel {
+            id: timeline
+            readonly property bool shown: !simulation.running && vtkView.times.length > 1
+            readonly property int last: vtkView.times.length - 1
+            readonly property int index: vtkView.timeIndex < 0 ? last : Math.min(vtkView.timeIndex, last)
+            property bool playing: false
+            function show(i) { vtkView.timeIndex = Math.max(0, Math.min(i, last)) }
+            function togglePlay() {
+                if (!playing && index >= last) show(0) // replay from the start
+                playing = !playing
+            }
+            visible: shown
+            onShownChanged: if (!shown) playing = false
+            readonly property real areaLeft: setupPanel.x + setupPanel.width + gap
+            readonly property real areaRight: resultsPanel.x - gap
+            width: Math.min(620, areaRight - areaLeft)
+            x: areaLeft + (areaRight - areaLeft - width) / 2
+            y: (plotPanel.shown ? plotPanel.y : consolePanel.y) - gap - height
+            Behavior on y { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+            height: 48
+            radius: 12
+
+            // Next frame once the previous one is on screen, at most ~4 per second.
+            Timer {
+                interval: 250; repeat: true
+                running: timeline.playing
+                onTriggered: {
+                    if (vtkView.loading) return
+                    if (timeline.index >= timeline.last) { timeline.playing = false; return }
+                    timeline.show(timeline.index + 1)
+                }
+            }
+            RowLayout {
+                anchors { fill: parent; leftMargin: 8; rightMargin: 14 }
+                spacing: 4
+                Repeater {
+                    model: [{ icon: "first", tip: "First time step", act: () => timeline.show(0) },
+                            { icon: timeline.playing ? "pause" : "play", tip: timeline.playing ? "Pause" : "Play", act: () => timeline.togglePlay() },
+                            { icon: "last", tip: "Last time step", act: () => timeline.show(timeline.last) }]
+                    delegate: ToolButton {
+                        required property var modelData
+                        ToolTip.visible: hovered; ToolTip.text: modelData.tip; ToolTip.delay: 500
+                        onClicked: modelData.act()
+                        contentItem: Item { PlaybackIcon { anchors.centerIn: parent; kind: modelData.icon; color: modelData.icon === "first" || modelData.icon === "last" ? Theme.text : accent } }
+                        background: Rectangle { radius: 8; color: parent.hovered ? Theme.controlHover : "transparent"; implicitWidth: 34; implicitHeight: 34 }
+                    }
+                }
+                Slider {
+                    Layout.fillWidth: true
+                    from: 0; to: timeline.last; stepSize: 1; snapMode: Slider.SnapAlways
+                    value: timeline.index
+                    onMoved: timeline.show(Math.round(value))
+                }
+                Label {
+                    text: "t = " + Number(Number(vtkView.times[timeline.index] ?? 0).toPrecision(4)) + " s"
+                    color: Theme.textStrong; font.pixelSize: 12; font.bold: true
+                    Layout.preferredWidth: 86; horizontalAlignment: Text.AlignRight
+                }
+                Label {
+                    text: (timeline.index + 1) + " / " + vtkView.times.length
+                    color: muted; font.pixelSize: 12
+                    Layout.preferredWidth: 52; horizontalAlignment: Text.AlignRight
+                }
             }
         }
 

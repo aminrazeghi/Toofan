@@ -68,6 +68,10 @@ public:
     void setSpeed(double value);
     void setMeshQuality(const QString &value);
     Q_INVOKABLE void startSimulation();
+    // Clears the model, results and log and restores default settings. Cases on disk are kept.
+    Q_INVOKABLE void newProject();
+    // Opens the current case directory (or, before a run, the case root) in the file manager.
+    Q_INVOKABLE void openCaseFolder();
     Q_INVOKABLE void stopSimulation();
 signals:
     void stlPathChanged(); void modelRotationChanged(); void caseRootChanged(); void speedChanged(); void meshQualityChanged();
@@ -91,8 +95,10 @@ private:
     QString m_caseRoot;
     CaseSettings m_settings;
     QVector3D m_modelRotation;
-    double m_speed = 20.0;
-    QString m_meshQuality = QStringLiteral("Coarse");
+    static constexpr double kDefaultSpeed = 20.0;
+    static constexpr auto kDefaultMeshQuality = "Coarse";
+    double m_speed = kDefaultSpeed;
+    QString m_meshQuality = QString::fromLatin1(kDefaultMeshQuality);
     QString m_status = QStringLiteral("Ready");
     QString m_solver = QStringLiteral("pimpleFoam");
     QString m_log;

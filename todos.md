@@ -1,3 +1,4 @@
 - Add max iteration and converge criterion to advance tab
-- Download or ship openfoam with the App
 - Animation button to show Animation of results (after simulation)
+- Windows and Mac
+- GitHub action
