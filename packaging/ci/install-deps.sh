@@ -9,7 +9,8 @@
 #   - a relocatable Open MPI (packaging/build-openmpi.sh), into $DEPS_DIR/openmpi
 #
 # Qt, VTK and Open MPI are skipped when already present in $DEPS_DIR, so that directory can be cached.
-# Environment: QT_VERSION, VTK_VERSION, OPENFOAM_VERSION, OPENMPI_VERSION, DEPS_DIR (defaults below).
+# Environment: QT_VERSION, VTK_VERSION, OPENFOAM_VERSION, OPENMPI_VERSION, DEPS_DIR (defaults below);
+# QT_BASE: a Qt mirror for aqt (e.g. https://mirrors.ocf.berkeley.edu/qt/) instead of the redirector.
 # Prints the variables package-linux.sh needs and, on GitHub Actions, adds them to $GITHUB_ENV.
 set -euo pipefail
 
@@ -29,7 +30,7 @@ $SUDO apt-get update -q
 $SUDO apt-get install -y -q --no-install-recommends \
     build-essential cmake ninja-build git curl ca-certificates gnupg file patchelf binutils \
     python3 python3-venv \
-    bzip2 \
+    bzip2 zlib1g-dev \
     libgl-dev libegl-dev libglx-dev libopengl-dev libvulkan-dev \
     libfontconfig1 libfreetype6 libdbus-1-3 libglib2.0-0t64 \
     libx11-6 libx11-xcb1 libxext6 libxrender1 libxi6 libsm6 libice6 libxkbcommon0 libxkbcommon-x11-0 \
@@ -51,7 +52,12 @@ log "Qt $QT_VERSION"
 if [ ! -x "$QT_PREFIX/bin/qtpaths" ]; then
     python3 -m venv "$DEPS_DIR/aqt"
     "$DEPS_DIR/aqt/bin/pip" install -q aqtinstall
-    "$DEPS_DIR/aqt/bin/aqt" install-qt linux desktop "$QT_VERSION" linux_gcc_64 --outputdir "$DEPS_DIR/Qt"
+    # Qt's mirrors time out now and then: retry (aqt skips nothing, so each try starts over).
+    for attempt in 1 2 3; do
+        "$DEPS_DIR/aqt/bin/aqt" install-qt linux desktop "$QT_VERSION" linux_gcc_64 --outputdir "$DEPS_DIR/Qt" ${QT_BASE:+--base "$QT_BASE"} && break
+        [ "$attempt" -lt 3 ] || exit 1
+        log "Qt download failed, retrying ($attempt/3)"; rm -rf "$DEPS_DIR/Qt/$QT_VERSION"; sleep 10
+    done
 fi
 [ -x "$QT_PREFIX/bin/qtpaths" ] || { echo "Qt install failed: $QT_PREFIX/bin/qtpaths missing" >&2; exit 1; }
 

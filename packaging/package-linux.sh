@@ -154,6 +154,7 @@ QTPATHS="${QTPATHS:-$(command -v qtpaths6 || command -v qtpaths || true)}"
 [ -n "$QTPATHS" ] || die "qtpaths6 not found; set QTPATHS"
 QT_PLUGIN_DIR="$("$QTPATHS" --query QT_INSTALL_PLUGINS)"
 QT_QML_DIR="$("$QTPATHS" --query QT_INSTALL_QML)"
+QT_LIB_DIR="$("$QTPATHS" --query QT_INSTALL_LIBS)"
 QMLIMPORTSCANNER="$("$QTPATHS" --query QT_INSTALL_LIBEXECS)/qmlimportscanner"
 [ -x "$QMLIMPORTSCANNER" ] || die "qmlimportscanner not found at $QMLIMPORTSCANNER"
 
@@ -291,7 +292,13 @@ rm -f "$MPI_DEST"/share/*/*-wrapper-data.txt "$MPI_DEST"/share/*/*.pc
 # 5. Shared libraries
 log "Collecting libraries for the application"
 mapfile -t app_elves < <(find "$USR/bin" "$USR/plugins" "$USR/qml" -type f \( -name '*.so*' -o -perm -u+x \) | while read -r f; do is_elf "$f" && echo "$f"; done)
-bundle_deps "$LIBDIR" "$APPDIR" "${app_elves[@]}"
+# Copied libraries and plugins no longer find their siblings through their own RUNPATHs (Qt
+# plugins: $ORIGIN/../../lib, now the bundle's still empty usr/lib; VTK installs may have none).
+# Resolve them where the build found them: the executable's RUNPATH (Qt and VTK library
+# directories, which need not be system ones, e.g. on CI), and Qt's library directory.
+app_search="$(patchelf --print-rpath "$BUILD_DIR/$APP_BIN")"
+LD_LIBRARY_PATH="${app_search:+$app_search:}$QT_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    bundle_deps "$LIBDIR" "$APPDIR" "${app_elves[@]}"
 info "$(find "$LIBDIR" -maxdepth 1 -type f | wc -l) libraries in usr/lib"
 
 log "Collecting host libraries Open MPI and OpenFOAM need"

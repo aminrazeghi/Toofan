@@ -13,7 +13,8 @@
 # plugin directories to locate at run time.
 # Moved elsewhere, it runs with OPAL_PREFIX, PRTE_PREFIX and PMIX_PREFIX set to its new location.
 # libmpi.so.40 keeps the ABI of Open MPI 3.x/4.x/5.x, which OpenFOAM's sys-openmpi Pstream uses.
-# An existing build of the same version in PREFIX is kept.
+# An existing build of the same version in PREFIX is kept. Needs the zlib headers: without
+# them PMIx warns about missing compression at every mpirun.
 set -euo pipefail
 
 OPENMPI_VERSION="${OPENMPI_VERSION:-5.0.10}"
@@ -28,6 +29,8 @@ if [ -x "$PREFIX/bin/mpirun" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$OPENMPI_VE
     log "Open MPI $OPENMPI_VERSION already built in $PREFIX"
     exit 0
 fi
+
+echo '#include <zlib.h>' | cc -E - >/dev/null 2>&1 || { echo "error: zlib headers missing (install zlib1g-dev / zlib-devel)" >&2; exit 1; }
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

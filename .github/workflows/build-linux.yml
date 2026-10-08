@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -45,7 +45,7 @@ jobs:
           fi
 
       - name: Cache Qt, VTK and Open MPI
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.DEPS_DIR }}
           key: deps-ubuntu-24.04-qt${{ env.QT_VERSION }}-vtk${{ env.VTK_VERSION }}-ompi${{ env.OPENMPI_VERSION }}-${{ hashFiles('packaging/ci/install-deps.sh', 'packaging/build-openmpi.sh') }}
@@ -60,7 +60,7 @@ jobs:
         working-directory: dist
         run: sha256sum *.AppImage *.tar.gz | tee SHA256SUMS
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: toofan-linux-x86_64
           path: |
@@ -77,7 +77,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: toofan-linux-x86_64
           path: dist
