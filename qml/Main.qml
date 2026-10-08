@@ -54,7 +54,7 @@ ApplicationWindow {
     // Floating layout: distance from the window edge and between panels.
     readonly property int edge: 14
     readonly property int gap: 12
-    readonly property int sideWidth: 250
+    readonly property int sideWidth: 200
 
     function formatCoefficient(value) {
         if (isNaN(value)) return "—"
@@ -157,7 +157,6 @@ ApplicationWindow {
                                     edge + brandBar.height + gap,
                                     edge + sideWidth + gap,
                                     edge + (consolePanel.expanded ? 170 : 40) + gap
-                                        + (plotPanel.shown ? plotPanel.height + gap : 0)
                                         + (timeline.shown ? timeline.height + gap : 0))
             // A new run or case shows (and follows) the latest time step again.
             onCasePathChanged: timeIndex = -1
@@ -431,6 +430,7 @@ ApplicationWindow {
                     }
                 }
                 ColumnLayout {
+                    id: resultsBody
                     visible: !resultsPanel.userCollapsed
                     Layout.fillWidth: true
                     spacing: 8
@@ -444,15 +444,16 @@ ApplicationWindow {
                                 { kind: "drag", label: "Drag coefficient", glyph: "Cd" },
                                 { kind: "lift", label: "Lift coefficient", glyph: "Cl" }]
                         delegate: Button {
+                            id: plotButton
                             required property var modelData
                             readonly property bool active: openPlot === modelData.kind
                             Layout.fillWidth: true
-                            onClicked: openPlot = active ? "" : modelData.kind
+                            onClicked: { plotPanel.anchorButton = plotButton; openPlot = active ? "" : modelData.kind }
                             contentItem: RowLayout {
                                 spacing: 10
                                 Label { text: modelData.glyph; color: accent; font.pixelSize: 13; font.bold: true; Layout.preferredWidth: 22; horizontalAlignment: Text.AlignHCenter }
                                 Label { text: modelData.label; color: active ? accent : Theme.text; font.pixelSize: 13; Layout.fillWidth: true }
-                                Label { text: active ? "▾" : "▸"; color: muted; font.pixelSize: 12 }
+                                Label { text: active ? "◂" : "▸"; color: active ? accent : muted; font.pixelSize: 12 }
                             }
                             background: Rectangle { radius: 9; implicitHeight: 38; color: active ? Theme.selected : (parent.hovered ? Theme.controlHover : Theme.control); border.color: active ? accent : Theme.controlBorder }
                         }
@@ -471,6 +472,7 @@ ApplicationWindow {
             Label { id: previewLabel; anchors.centerIn: parent; text: vtkView.previewInfo + (vtkView.loading ? (vtkView.previewInfo ? "  ·  " : "") + "Updating…" : ""); color: Theme.text; font.pixelSize: 12 }
         }
         Column {
+            id: viewControls
             visible: simulation.previewRevision > 0
             anchors { right: resultsPanel.left; rightMargin: gap; top: resultsPanel.top }
             spacing: 8
@@ -507,10 +509,10 @@ ApplicationWindow {
             visible: shown
             onShownChanged: if (!shown) playing = false
             readonly property real areaLeft: setupPanel.x + setupPanel.width + gap
-            readonly property real areaRight: resultsPanel.x - gap
+            readonly property real areaRight: (plotPanel.shown ? plotPanel.x : resultsPanel.x) - gap
             width: Math.min(620, areaRight - areaLeft)
             x: areaLeft + (areaRight - areaLeft - width) / 2
-            y: (plotPanel.shown ? plotPanel.y : consolePanel.y) - gap - height
+            y: consolePanel.y - gap - height
             Behavior on y { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
             height: 48
             radius: 12
@@ -559,22 +561,29 @@ ApplicationWindow {
             }
         }
 
-        // ---- Plot, sliding up between the side panels above the console ----
+        // ---- Plot, popping out to the left of its button in the results panel ----
         FloatingPanel {
             id: plotPanel
             readonly property bool shown: openPlot !== ""
-            x: setupPanel.x + setupPanel.width + gap
-            width: resultsPanel.x - gap - x
-            height: Math.max(220, window.height * 0.4)
-            y: shown ? consolePanel.y - gap - height : window.height + 8
-            Behavior on y { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-            visible: y < window.height
+            property Item anchorButton: null   // the plot button that opened it
+            width: 440
+            height: 270
+            x: resultsPanel.x - gap - width + (shown ? 0 : 16)
+            Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+            // Centred on its button, kept between the top bar and the console.
+            readonly property real buttonCenter: anchorButton
+                ? resultsPanel.y + resultsColumn.y + resultsBody.y + anchorButton.y + anchorButton.height / 2
+                : resultsPanel.y + resultsPanel.height / 2
+            y: Math.max(viewControls.visible ? viewControls.y + viewControls.height + gap : actionBar.y + actionBar.height + gap, Math.min(buttonCenter - height / 2, consolePanel.y - gap - height))
+            opacity: shown ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 180 } }
+            visible: opacity > 0
             color: Theme.panel // opaque: plots must stay readable over any field colors
             LinePlot {
                 id: monitorPlot
-                // Keep showing the last plot while sliding out.
+                // Keep showing the last plot while fading out.
                 property string kind: "residuals"
-                anchors { fill: parent; margins: 14; rightMargin: 46 }
+                anchors { fill: parent; margins: 12; rightMargin: 40 }
                 title: kind === "drag" ? "Drag coefficient" : kind === "lift" ? "Lift coefficient" : "Residuals"
                 logScale: kind === "residuals"
                 series: kind === "drag" ? simulation.dragHistory : kind === "lift" ? simulation.liftHistory : simulation.residuals
@@ -589,8 +598,8 @@ ApplicationWindow {
                 anchors { right: parent.right; top: parent.top; margins: 8 }
                 text: "✕"
                 onClicked: openPlot = ""
-                contentItem: Text { text: parent.text; color: muted; font.pixelSize: 14; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                background: Rectangle { radius: 6; color: parent.hovered ? Theme.controlHover : "transparent"; implicitWidth: 30; implicitHeight: 30 }
+                contentItem: Text { text: parent.text; color: muted; font.pixelSize: 13; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle { radius: 6; color: parent.hovered ? Theme.controlHover : "transparent"; implicitWidth: 26; implicitHeight: 26 }
             }
         }
 

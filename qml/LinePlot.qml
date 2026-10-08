@@ -14,34 +14,43 @@ Item {
     onSeriesColorsChanged: canvas.requestPaint() // theme switch
     onLogScaleChanged: canvas.requestPaint()
 
-    // Header strip: title on the left (leave empty to place other controls there), legend on the right.
-    Item { id: header; width: parent.width; height: 30 }
-    Label { text: root.title; anchors.verticalCenter: header.verticalCenter; color: Theme.textStrong; font.pixelSize: 15; font.bold: true }
-    Row {
-        anchors.right: parent.right; anchors.verticalCenter: header.verticalCenter; spacing: 14
+    // Header strip: title on the left, legend on the right (wrapping onto more lines when narrow).
+    Item { id: header; width: parent.width; height: Math.max(26, legend.height) }
+    Label { id: titleLabel; text: root.title; y: (26 - height) / 2; color: Theme.textStrong; font.pixelSize: 14; font.bold: true }
+    Flow {
+        id: legend
+        anchors.right: parent.right
+        width: parent.width - titleLabel.implicitWidth - 16
+        layoutDirection: Qt.RightToLeft
+        spacing: 12
         Repeater {
-            model: root.series
+            // Laid out right to left, so fed last series first to read in series order.
+            model: root.series.length
             Row {
-                required property var modelData
                 required property int index
+                readonly property int seriesIndex: root.series.length - 1 - index
+                readonly property var modelData: root.series[seriesIndex]
                 spacing: 6
-                Rectangle { width: 12; height: 3; radius: 1; color: root.seriesColors[index % root.seriesColors.length]; anchors.verticalCenter: parent.verticalCenter }
+                height: 26
+                Rectangle { width: 12; height: 3; radius: 1; color: root.seriesColors[seriesIndex % root.seriesColors.length]; anchors.verticalCenter: parent.verticalCenter }
                 // Single-series plots also show the latest value.
                 Label {
                     text: modelData.name + (root.series.length === 1 && modelData.values.length
                                             ? "  " + Number(modelData.values[modelData.values.length - 1]).toPrecision(4) : "")
-                    color: Theme.text; font.pixelSize: 12
+                    color: Theme.text; font.pixelSize: 11
+                    anchors.verticalCenter: parent.verticalCenter
                 }
             }
         }
     }
     Label {
         anchors.centerIn: canvas; visible: root.series.length === 0
-        text: root.emptyText; color: Theme.muted; font.pixelSize: 13
+        width: canvas.width - 24; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+        text: root.emptyText; color: Theme.muted; font.pixelSize: 12
     }
     Canvas {
         id: canvas
-        anchors { top: header.bottom; topMargin: 10; left: parent.left; right: parent.right; bottom: parent.bottom }
+        anchors { top: header.bottom; topMargin: 6; left: parent.left; right: parent.right; bottom: parent.bottom }
         onWidthChanged: requestPaint()
         onHeightChanged: requestPaint()
 
