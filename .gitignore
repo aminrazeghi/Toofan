@@ -8,3 +8,4 @@ CMakeUserPresets.json
 compile_commands.json
 /build-release/
 /dist/
+/assets/__pycache__/

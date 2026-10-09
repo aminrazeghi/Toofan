@@ -129,6 +129,8 @@ ICON = f'''<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" view
   <title>Toofan</title>
 {mark()}</svg>
 '''
+from toofan_logo import build_svg, mark
+ICON = build_svg()
 
 FONT = "'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
 LOGO = f'''<svg xmlns="http://www.w3.org/2000/svg" width="680" height="300" viewBox="0 0 680 300" role="img">
