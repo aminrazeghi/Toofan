@@ -1,14 +1,12 @@
 # Builds the Linux x86_64 packages (AppImage and tar.gz, with Qt, VTK, OpenFOAM and Open MPI bundled)
-# on every push to main and every pull request, and uploads them as workflow artifacts.
-# Pushing a tag v<version> (matching the version in qml/AboutDialog.qml) also publishes them
-# as a GitHub release.
+# when a tag v<version> is pushed (matching the version in qml/AboutDialog.qml), and publishes
+# them as a GitHub release. Commits to main do not trigger it. "Run workflow" in the Actions tab
+# builds any branch on demand and uploads the packages as workflow artifacts, without a release.
 name: Build Linux packages
 
 on:
   push:
-    branches: [main]
     tags: ["v*"]
-  pull_request:
   workflow_dispatch:
 
 permissions:
