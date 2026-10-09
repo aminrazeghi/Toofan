@@ -6,7 +6,7 @@ import QtQuick.Layouts
 Popup {
     id: root
     property var info: ({})   // appInfo from main.cpp: Qt and VTK versions
-    readonly property string version: "0.1.0"
+    readonly property string version: "0.1.1"
     readonly property string author: "amin razeghiyadaki"
     readonly property string repositoryUrl: "https://github.com/aminrazeghi/Toofan"
 
