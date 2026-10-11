@@ -35,7 +35,8 @@ OPENFOAM_PROGRAMS=(blockMesh surfaceFeatureExtract snappyHexMesh pimpleFoam rhoP
 # Open MPI programs: mpirun starts prterun, which launches the processes on this machine.
 OPENMPI_PROGRAMS=(mpirun mpiexec prterun prted prte ompi_info)
 
-# Qt plugins: windowing (Wayland, X11), SVG icons and images, input methods.
+# Qt plugins: windowing (Wayland, X11), SVG icons and images, input methods, and the XDG portal
+# theme, through which file dialogs are the desktop's own (GNOME, KDE, ...).
 QT_PLUGINS=(
     platforms/libqwayland.so
     platforms/libqxcb.so
@@ -48,6 +49,7 @@ QT_PLUGINS=(
     iconengines/libqsvgicon.so
     platforminputcontexts/libcomposeplatforminputcontextplugin.so
     platforminputcontexts/libibusplatforminputcontextplugin.so
+    platformthemes/libqxdgdesktopportal.so
 )
 # QML modules never needed: the app forces the Basic style.
 QML_SKIP_RE='/QtQuick/Controls/(Fusion|Imagine|Material|Universal)(/|$)'
@@ -348,6 +350,9 @@ cat > "$APPDIR/AppRun" <<EOF
 #!/bin/sh
 # Starts $APP_NAME from the AppImage or from the unpacked tar bundle.
 HERE="\$(dirname "\$(readlink -f "\$0")")"
+# Native file dialogs through the desktop portal (the only platform theme bundled). Without a
+# portal, Qt falls back to its own dialogs.
+export QT_QPA_PLATFORMTHEME="\${QT_QPA_PLATFORMTHEME:-xdgdesktopportal}"
 exec "\$HERE/usr/bin/$APP_BIN" "\$@"
 EOF
 chmod +x "$APPDIR/AppRun"
