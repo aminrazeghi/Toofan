@@ -61,17 +61,26 @@ VTK installed elsewhere, pass `-DVTK_DIR=<prefix>/lib/cmake/vtk-X.Y` or
 
 ## OpenFOAM
 
-The app does not need to be started from an OpenFOAM shell. Each step runs in a
-fresh bash that sources OpenFOAM's own `etc/bashrc`, which is looked up in this
-order:
+The app does not need to be started from an OpenFOAM shell.
 
-1. the `OPENFOAM_BASHRC` environment variable
-2. a copy bundled with the app (`<app>/../openfoam/etc/bashrc`)
-3. the newest `/usr/lib/openfoam/openfoam*/etc/bashrc`
+- **Linux**: each step runs in a fresh bash that sources OpenFOAM's own
+  `etc/bashrc`, looked up in this order: the `OPENFOAM_BASHRC` environment
+  variable, a copy bundled with the app (`<app>/../openfoam/etc/bashrc`), the
+  newest `/usr/lib/openfoam/openfoam*/etc/bashrc`. Parallel steps run under
+  Open MPI's `mpirun`.
+- **Windows**: OpenCFD's MinGW build of OpenFOAM, from the `OPENFOAM_DIR`
+  environment variable (an `OpenFOAM-v<version>` directory) or bundled next to
+  `toofan.exe`. The programs run directly with `WM_PROJECT_DIR` and `PATH` set,
+  as OpenFOAM's own `setEnvVariables` batch file does; parallel steps run under
+  MS-MPI's `mpiexec`, which is bundled in OpenFOAM's `bin` directory.
 
-Cases are written to `~/Toofan-Projects/<model name>`; the directory is created if
-it is missing. Re-running a model regenerates its case and removes previous
-meshes and results. The templates live in `templates/windTunnel`; see its
+Cases are written to `<projects folder>/<model name>`; the projects folder is
+`~/Toofan-Projects` by default and can be changed in Settings. OpenFOAM cannot
+handle paths with spaces or non-ASCII characters, so the app checks the projects
+folder (and OpenFOAM's own location) at startup, offers to pick another folder,
+and does not start a run until it is fixed. Model names become case names with
+such characters replaced by `_`. Re-running a model regenerates its case and
+removes previous meshes and results. The templates live in `templates/windTunnel`; see its
 README.
 
 ## Packaging (Linux x86_64)
@@ -91,6 +100,26 @@ what is bundled or used; the OpenFOAM to bundle must have the `sys-openmpi`
 Pstream (as OpenCFD's packages do). The
 packages require a glibc at least as new as the build machine's. The bundled
 licenses and source links are in `usr/share/licenses`.
+
+## Packaging (Windows x64)
+
+In PowerShell 7 on Windows, with Visual Studio 2022 (C++), CMake and 7-Zip:
+
+```powershell
+packaging/ci/install-deps-windows.ps1   # Qt, VTK, OpenFOAM for Windows, MS-MPI, Inno Setup (into C:\deps)
+packaging/package-windows.ps1           # Release build and dist/toofan-<version>-windows-x86_64-setup.exe
+```
+
+OpenFOAM and MS-MPI are unpacked from OpenCFD's
+`OpenFOAM-v<version>-windows-mingw.exe` installer without running it; MS-MPI
+goes next to the OpenFOAM programs, so the app needs no MS-MPI install or
+administrator rights. Before building the installer, the script meshes a small
+case with the bundled OpenFOAM and checks it with 2 MPI processes. The
+installer (Inno Setup) installs per user into a folder without spaces
+(`%LOCALAPPDATA%\Programs\Toofan`, or `C:\Toofan` when the user name has a space
+or non-ASCII character) and refuses folders OpenFOAM cannot run from; its license
+page shows the MS-MPI redistributable terms. The executable icon is
+`assets/toofan.ico`, rendered from `assets/toofan-icon.svg`.
 
 ## Status
 

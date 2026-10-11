@@ -1,8 +1,8 @@
-# Builds the Linux x86_64 packages (AppImage and tar.gz, with Qt, VTK, OpenFOAM and Open MPI bundled)
-# when a tag v<version> is pushed (matching the version in qml/AboutDialog.qml), and publishes
-# them as a GitHub release. Commits to main do not trigger it. "Run workflow" in the Actions tab
+# Builds the Linux x86_64 packages (AppImage and tar.gz) and the Windows x64 installer, with Qt,
+# VTK, OpenFOAM and MPI (Open MPI on Linux, MS-MPI on Windows) bundled, when a tag v<version> is
+# pushed (matching the version in qml/AboutDialog.qml), and publishes them as a GitHub release. Commits to main do not trigger it. "Run workflow" in the Actions tab
 # builds any branch on demand and uploads the packages as workflow artifacts, without a release.
-name: Build Linux packages
+name: Build packages
 
 on:
   push:
@@ -21,7 +21,7 @@ env:
   VTK_VERSION: "9.6.2"
   OPENFOAM_VERSION: "2606"
   OPENMPI_VERSION: "5.0.10"
-  DEPS_DIR: /home/runner/deps   # Qt, VTK and Open MPI; cached between runs
+  DEPS_DIR: /home/runner/deps   # Linux: Qt, VTK and Open MPI; cached between runs
 
 jobs:
   linux-x86_64:
@@ -56,7 +56,7 @@ jobs:
 
       - name: Checksums
         working-directory: dist
-        run: sha256sum *.AppImage *.tar.gz | tee SHA256SUMS
+        run: sha256sum *.AppImage *.tar.gz | tee SHA256SUMS-linux.txt
 
       - uses: actions/upload-artifact@v6
         with:
@@ -64,20 +64,61 @@ jobs:
           path: |
             dist/*.AppImage
             dist/*.tar.gz
-            dist/SHA256SUMS
+            dist/SHA256SUMS-linux.txt
+          if-no-files-found: error
+          compression-level: 0   # already compressed
+
+  windows-x86_64:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    env:
+      DEPS_DIR: C:\deps   # Qt, VTK, OpenFOAM for Windows and MS-MPI; cached between runs
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Cache Qt, VTK, OpenFOAM and MS-MPI
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.DEPS_DIR }}
+          key: deps-windows-2022-qt${{ env.QT_VERSION }}-vtk${{ env.VTK_VERSION }}-of${{ env.OPENFOAM_VERSION }}-${{ hashFiles('packaging/ci/install-deps-windows.ps1') }}
+
+      - name: Install dependencies
+        run: packaging/ci/install-deps-windows.ps1
+
+      - name: Build and package
+        run: packaging/package-windows.ps1 -OutDir dist
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          Get-ChildItem *.exe | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_ -Algorithm SHA256).Hash.ToLower(), $_.Name } |
+            Tee-Object SHA256SUMS-windows.txt
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: toofan-windows-x86_64
+          path: |
+            dist/*.exe
+            dist/SHA256SUMS-windows.txt
           if-no-files-found: error
           compression-level: 0   # already compressed
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: linux-x86_64
+    needs: [linux-x86_64, windows-x86_64]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v7
         with:
-          name: toofan-linux-x86_64
+          pattern: toofan-*
+          merge-multiple: true
           path: dist
 
       - name: Publish the release

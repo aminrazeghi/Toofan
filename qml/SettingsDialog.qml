@@ -2,14 +2,17 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// App settings: theme and contour palette.
+// App settings: projects folder, theme and contour palette.
 Popup {
     id: root
     property bool darkTheme: true
     property string colorMap
     property var colorMaps: []   // VtkView.colorMaps()
+    property string projectsFolder
+    property string projectsFolderProblem   // why OpenFOAM cannot use the folder, or ""
     signal themeSelected(bool dark)
     signal colorMapSelected(string value)
+    signal changeProjectsFolder()
 
     modal: true
     focus: true
@@ -32,7 +35,28 @@ Popup {
             }
         }
 
-        Label { text: "THEME"; color: Theme.muted; font.pixelSize: 11; font.bold: true; font.letterSpacing: 1.4 }
+        Label { text: "PROJECTS FOLDER"; color: Theme.muted; font.pixelSize: 11; font.bold: true; font.letterSpacing: 1.4 }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+            Label {
+                text: root.projectsFolder
+                color: root.projectsFolderProblem ? Theme.danger : Theme.textStrong
+                font.pixelSize: 13; elide: Text.ElideMiddle
+                Layout.fillWidth: true
+                ToolTip.visible: folderHover.hovered && truncated; ToolTip.text: text; ToolTip.delay: 400
+                HoverHandler { id: folderHover }
+            }
+            Button { text: "Change…"; onClicked: root.changeProjectsFolder() }
+        }
+        Label {
+            Layout.fillWidth: true
+            text: root.projectsFolderProblem || "Each model's OpenFOAM case is a folder in here."
+            color: root.projectsFolderProblem ? Theme.danger : Theme.faint
+            font.pixelSize: 11; wrapMode: Text.WordWrap
+        }
+
+        Label { text: "THEME"; color: Theme.muted; font.pixelSize: 11; font.bold: true; font.letterSpacing: 1.4; Layout.topMargin: 6 }
         SegmentedControl {
             options: [{ value: "dark", label: "Dark" }, { value: "light", label: "Light" }]
             current: root.darkTheme ? "dark" : "light"

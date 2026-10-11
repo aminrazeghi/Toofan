@@ -5,28 +5,38 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QThread>
 #include <QUrl>
 
-SimulationController::SimulationController(QObject *parent) : QObject(parent), m_caseRoot(OpenFoamCase::defaultCaseRoot())
+namespace {
+const QString kCaseRootKey = QStringLiteral("paths/projectsFolder");
+
+// Copies directory source to target (which must not exist yet), recursively.
+QString copyDirectory(const QString &source, const QString &target)
 {
-    // OPENFOAM_BASHRC overrides; then a copy bundled with the app (packaging/package-linux.sh);
-    // then the newest system install.
-    m_openFoamBashrc = qEnvironmentVariable("OPENFOAM_BASHRC");
-    if (m_openFoamBashrc.isEmpty()) {
-        const QString bundled = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../openfoam/etc/bashrc"));
-        if (QFileInfo::exists(bundled))
-            m_openFoamBashrc = QFileInfo(bundled).canonicalFilePath();
-    }
-    if (m_openFoamBashrc.isEmpty()) {
-        QDir installs(QStringLiteral("/usr/lib/openfoam"));
-        const QStringList versions = installs.entryList(QStringList{QStringLiteral("openfoam*")}, QDir::Dirs, QDir::Name | QDir::Reversed);
-        for (const QString &version : versions) {
-            const QString candidate = installs.filePath(version + QStringLiteral("/etc/bashrc"));
-            if (QFileInfo::exists(candidate)) { m_openFoamBashrc = candidate; break; }
+    const QDir from(source);
+    if (!from.exists()) return QStringLiteral("%1 does not exist.").arg(source);
+    if (!QDir().mkpath(target)) return QStringLiteral("Cannot create %1.").arg(target);
+    for (const QFileInfo &entry : from.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot)) {
+        const QString destination = QDir(target).filePath(entry.fileName());
+        if (entry.isDir()) {
+            if (QString error = copyDirectory(entry.filePath(), destination); !error.isEmpty()) return error;
+        } else if (!QFile::copy(entry.filePath(), destination)) {
+            return QStringLiteral("Cannot copy %1 to %2.").arg(entry.filePath(), destination);
         }
     }
-    probeParallel();
+    return {};
+}
+}
+
+SimulationController::SimulationController(QObject *parent)
+    : QObject(parent), m_caseRoot(QSettings().value(kCaseRootKey, OpenFoamCase::defaultCaseRoot()).toString())
+{
+    m_openFoam.probeParallel(this, [this](const QString &mpi) {
+        if (mpi.isEmpty()) return;
+        m_parallelAvailable = true; m_mpiName = mpi; emit parallelAvailableChanged();
+    });
     // Merge stderr into stdout so each step's log file keeps the original interleaving.
     m_process.setProcessChannelMode(QProcess::MergedChannels);
     connect(&m_settings, &CaseSettings::changed, this, &SimulationController::updateSolver);
@@ -70,31 +80,36 @@ SimulationController::SimulationController(QObject *parent) : QObject(parent), m
 
 int SimulationController::maxProcessors() { return std::max(QThread::idealThreadCount(), 1); }
 
-QStringList SimulationController::bashCommand(const QStringList &command) const
+QString SimulationController::pathProblem(const QString &path)
 {
-    // OpenFOAM's bashrc sets WM_PROJECT_DIR, FOAM_* paths, and library paths.
-    // Run each utility in a fresh sourced shell so the GUI itself need not be launched from one.
-    // The bashrc treats positional parameters as config settings, so clear them before sourcing.
-    return QStringList{QStringLiteral("-c"),
-                       QStringLiteral("rc=\"$1\"; shift; cmd=(\"$@\"); set --; source \"$rc\" >/dev/null && exec \"${cmd[@]}\""),
-                       QStringLiteral("toofan"), m_openFoamBashrc} + command;
+    if (path.contains(QRegularExpression(QStringLiteral("\\s"))))
+        return QStringLiteral("contains spaces");
+    for (const QChar c : path) {
+        if (c.unicode() > 0x7e)
+            return QStringLiteral("contains the non-ASCII character \u201c%1\u201d").arg(c);
+    }
+    return {};
 }
 
-void SimulationController::probeParallel()
+QString SimulationController::caseRootProblem() const
 {
-    if (m_openFoamBashrc.isEmpty()) return;
-    // Parallel runs need an MPI-enabled OpenFOAM (not the "dummy" Pstream) and its mpirun.
-    auto *probe = new QProcess(this);
-    connect(probe, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this, probe](int code, QProcess::ExitStatus status) {
-        const QString mpi = QString::fromLocal8Bit(probe->readAllStandardOutput()).trimmed();
-        if (status == QProcess::NormalExit && code == 0 && !mpi.isEmpty()) {
-            m_parallelAvailable = true; m_mpiName = mpi; emit parallelAvailableChanged();
-        }
-        probe->deleteLater();
-    });
-    probe->start(QStringLiteral("/bin/bash"),
-                 bashCommand({QStringLiteral("bash"), QStringLiteral("-c"),
-                              QStringLiteral("[ -n \"$FOAM_MPI\" ] && [ \"$FOAM_MPI\" != dummy ] && command -v mpirun >/dev/null && echo \"$FOAM_MPI\"")}));
+    const QString problem = pathProblem(QDir::toNativeSeparators(m_caseRoot));
+    return problem.isEmpty() ? QString() : QStringLiteral("The projects folder %1 %2, which OpenFOAM cannot handle.")
+                                               .arg(QDir::toNativeSeparators(m_caseRoot), problem);
+}
+
+QString SimulationController::openFoamProblem() const
+{
+    const QString problem = pathProblem(QDir::toNativeSeparators(m_openFoam.root()));
+    return problem.isEmpty() ? QString() : QStringLiteral("OpenFOAM is installed in %1, which %2. Install Toofan in a folder without spaces or non-ASCII characters.")
+                                               .arg(QDir::toNativeSeparators(m_openFoam.root()), problem);
+}
+
+QString SimulationController::caseNameFor(const QString &stlPath)
+{
+    QString name = QFileInfo(stlPath).completeBaseName();
+    name.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")), QStringLiteral("_"));
+    return name.isEmpty() ? QStringLiteral("model") : name;
 }
 
 void SimulationController::setStlPath(const QString &path)
@@ -125,7 +140,10 @@ void SimulationController::setCaseRoot(const QString &path)
 {
     const QUrl url(path);
     const QString localPath = url.isLocalFile() ? url.toLocalFile() : path;
-    if (m_caseRoot != localPath) { m_caseRoot = localPath; emit caseRootChanged(); }
+    if (localPath.isEmpty() || m_caseRoot == localPath) return;
+    m_caseRoot = QDir::cleanPath(localPath);
+    QSettings().setValue(kCaseRootKey, m_caseRoot);
+    emit caseRootChanged();
 }
 void SimulationController::setSpeed(double value) { if (!qFuzzyCompare(m_speed, value)) { m_speed = value; emit speedChanged(); updateSolver(); } }
 void SimulationController::updateSolver()
@@ -165,7 +183,7 @@ void SimulationController::openCaseFolder()
     // Before a run, the model's previous case if there is one.
     QString path = m_casePath;
     if (path.isEmpty() && !m_stlPath.isEmpty())
-        path = QDir(m_caseRoot).filePath(QFileInfo(m_stlPath).completeBaseName());
+        path = QDir(m_caseRoot).filePath(caseNameFor(m_stlPath));
     if (path.isEmpty() || !QFileInfo(path).isDir()) {
         path = m_caseRoot;
         QDir().mkpath(path);
@@ -178,7 +196,13 @@ void SimulationController::startSimulation()
 {
     if (m_process.state() != QProcess::NotRunning) return;
     updateSolver();
-    m_casePath = QDir(m_caseRoot).filePath(QFileInfo(m_stlPath).completeBaseName());
+    for (const QString &problem : {openFoamProblem(), caseRootProblem()}) {
+        if (problem.isEmpty()) continue;
+        m_status = QStringLiteral("Needs attention"); emit statusChanged();
+        appendLog(problem + QStringLiteral(" Choose another projects folder in Settings."));
+        return;
+    }
+    m_casePath = QDir(m_caseRoot).filePath(caseNameFor(m_stlPath));
     emit casePathChanged();
     setPreviewRevision(0);
     m_previewTime = 0.0;
@@ -197,26 +221,29 @@ void SimulationController::startSimulation()
     if (!note.isEmpty()) message += QLatin1Char('\n') + note;
     if (options.processors > 1) message += QStringLiteral("\nParallel run on %1 processors (%2).").arg(options.processors).arg(m_mpiName);
     // Fields are generated in 0.orig and copied after meshing, as snappyHexMesh changes the patches.
-    const Step copyFields{QStringLiteral("copyInitialFields"), {QStringLiteral("cp"), QStringLiteral("-r"), QStringLiteral("0.orig"), QStringLiteral("0")}};
+    const QString casePath = m_casePath;
+    const Step copyFields{QStringLiteral("copyInitialFields"), {}, false, [casePath] {
+        const QDir dir(casePath);
+        return copyDirectory(dir.filePath(QStringLiteral("0.orig")), dir.filePath(QStringLiteral("0")));
+    }};
     m_steps = {{QStringLiteral("blockMesh"), {QStringLiteral("blockMesh")}, true},
                {QStringLiteral("surfaceFeatureExtract"), {QStringLiteral("surfaceFeatureExtract")}}};
     if (options.processors > 1) {
         // Mesh in parallel, then reassemble the mesh (for the preview, and so the fields are
         // decomposed together with it), decompose again with the fields and solve in parallel.
-        // --oversubscribe: allow more processes than physical cores (Open MPI counts cores, not threads).
-        const QStringList mpirun{QStringLiteral("mpirun"), QStringLiteral("--oversubscribe"), QStringLiteral("-np"), QString::number(options.processors)};
+        const int n = options.processors;
         const QString parallel = QStringLiteral("-parallel");
-        m_steps += {{QStringLiteral("decomposeMesh"), {QStringLiteral("decomposePar"), QStringLiteral("-force")}},
-                    {QStringLiteral("snappyHexMesh"), mpirun + QStringList{QStringLiteral("snappyHexMesh"), QStringLiteral("-overwrite"), parallel}},
-                    {QStringLiteral("reconstructParMesh"), {QStringLiteral("reconstructParMesh"), QStringLiteral("-constant")}, true},
+        m_steps += {{QStringLiteral("decomposeMesh"), {QStringLiteral("decomposePar"), {QStringLiteral("-force")}}},
+                    {QStringLiteral("snappyHexMesh"), {QStringLiteral("snappyHexMesh"), {QStringLiteral("-overwrite"), parallel}, n}},
+                    {QStringLiteral("reconstructParMesh"), {QStringLiteral("reconstructParMesh"), {QStringLiteral("-constant")}}, true},
                     copyFields,
-                    {QStringLiteral("decomposePar"), {QStringLiteral("decomposePar"), QStringLiteral("-force")}},
-                    {m_solver, mpirun + QStringList{m_solver, parallel}},
+                    {QStringLiteral("decomposePar"), {QStringLiteral("decomposePar"), {QStringLiteral("-force")}}},
+                    {m_solver, {m_solver, {parallel}, n}},
                     {QStringLiteral("reconstructPar"), {QStringLiteral("reconstructPar")}, true}};
         m_resultsPath = QDir(m_casePath).filePath(QStringLiteral("processor0"));
         m_runProcessors = options.processors;
     } else {
-        m_steps += {{QStringLiteral("snappyHexMesh"), {QStringLiteral("snappyHexMesh"), QStringLiteral("-overwrite")}, true},
+        m_steps += {{QStringLiteral("snappyHexMesh"), {QStringLiteral("snappyHexMesh"), {QStringLiteral("-overwrite")}}, true},
                     copyFields,
                     {m_solver, {m_solver}}};
         m_resultsPath = m_casePath;
@@ -231,21 +258,36 @@ void SimulationController::runNextStep()
         m_status = QStringLiteral("Complete"); emit statusChanged(); appendLog(QStringLiteral("Workflow completed. OpenFOAM fields are in %1").arg(m_casePath)); return;
     }
     const Step &step = m_steps[m_step];
-    if (m_openFoamBashrc.isEmpty()) {
+    if (!m_openFoam.found()) {
         m_status = QStringLiteral("OpenFOAM unavailable"); emit statusChanged();
-        appendLog(QStringLiteral("OpenFOAM environment not found. Set OPENFOAM_BASHRC to its etc/bashrc file.")); return;
+        appendLog(QStringLiteral("OpenFOAM not found. ") + OpenFoamEnvironment::setupHint()); return;
     }
-    const QString commandLine = step.command.join(QLatin1Char(' '));
     m_lineBuffer.clear();
     m_stepLog.setFileName(QDir(m_casePath).filePath(step.name + QStringLiteral(".log")));
     if (!m_stepLog.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
         appendLog(QStringLiteral("Cannot write %1: %2").arg(m_stepLog.fileName(), m_stepLog.errorString()));
-    writeStepLog(QStringLiteral("$ %1\n").arg(commandLine).toLocal8Bit());
     m_status = QStringLiteral("Running %1").arg(step.name); emit statusChanged();
-    appendLog(QStringLiteral("$ %1").arg(commandLine));
+    if (step.action) {
+        // Runs in the app; continue from the event loop, as after a program.
+        const QString error = step.action();
+        QMetaObject::invokeMethod(this, [this, error] {
+            const QString &name = m_steps[m_step].name;
+            if (!error.isEmpty()) {
+                appendLog(error);
+                finishStep(QStringLiteral("%1 failed.").arg(name));
+                m_status = QStringLiteral("Failed"); emit statusChanged(); return;
+            }
+            finishStep(QStringLiteral("%1 finished.").arg(name));
+            ++m_step;
+            runNextStep();
+        }, Qt::QueuedConnection);
+        return;
+    }
     m_process.setWorkingDirectory(m_casePath);
     watchTimeDirectories(step.name == m_solver);
-    m_process.start(QStringLiteral("/bin/bash"), bashCommand(step.command));
+    const QString commandLine = m_openFoam.start(&m_process, step.command);
+    writeStepLog(QStringLiteral("$ %1\n").arg(commandLine).toLocal8Bit());
+    appendLog(QStringLiteral("$ %1").arg(commandLine));
 }
 
 void SimulationController::writeStepLog(const QByteArray &data)
@@ -267,7 +309,10 @@ void SimulationController::finishStep(const QString &summary)
 
 void SimulationController::stopSimulation()
 {
-    if (m_process.state() != QProcess::NotRunning) { m_stopRequested = true; m_process.terminate(); m_status = QStringLiteral("Stopping"); emit statusChanged(); }
+    if (m_process.state() == QProcess::NotRunning) return;
+    m_stopRequested = true;
+    m_status = QStringLiteral("Stopping"); emit statusChanged();
+    OpenFoamEnvironment::stop(&m_process);
 }
 
 void SimulationController::parseOutput(const QByteArray &output)

@@ -1,5 +1,6 @@
 #pragma once
 #include "CaseSettings.h"
+#include "OpenFoamEnvironment.h"
 #include <QFile>
 #include <QFileSystemWatcher>
 #include <QMap>
@@ -11,11 +12,18 @@
 #include <QVariantList>
 #include <QVector3D>
 #include <cmath>
+#include <functional>
 
 class SimulationController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString stlPath READ stlPath WRITE setStlPath NOTIFY stlPathChanged)
+    // Projects folder: each model's case is a directory in it. Saved in the app settings.
     Q_PROPERTY(QString caseRoot READ caseRoot WRITE setCaseRoot NOTIFY caseRootChanged)
+    // Why OpenFOAM cannot use the projects folder (spaces or non-ASCII characters in its path),
+    // or empty when it can.
+    Q_PROPERTY(QString caseRootProblem READ caseRootProblem NOTIFY caseRootChanged)
+    // The same for OpenFOAM's own location (fixed by reinstalling), or empty.
+    Q_PROPERTY(QString openFoamProblem READ openFoamProblem CONSTANT)
     Q_PROPERTY(CaseSettings *settings READ settings CONSTANT)
     // Model orientation in degrees about x, then y, then z; each in (-180, 180].
     Q_PROPERTY(QVector3D modelRotation READ modelRotation NOTIFY modelRotationChanged)
@@ -26,7 +34,7 @@ class SimulationController : public QObject {
     Q_PROPERTY(bool running READ running NOTIFY statusChanged)
     Q_PROPERTY(QString solver READ solver NOTIFY solverChanged)
     // The OpenFOAM environment has MPI (checked in the background at startup), so runs can use
-    // settings.processors > 1. mpiName is OpenFOAM's FOAM_MPI, e.g. sys-openmpi.
+    // settings.processors > 1. mpiName: OpenFOAM's FOAM_MPI on Linux (e.g. sys-openmpi), MS-MPI on Windows.
     Q_PROPERTY(bool parallelAvailable READ parallelAvailable NOTIFY parallelAvailableChanged)
     Q_PROPERTY(QString mpiName READ mpiName NOTIFY parallelAvailableChanged)
     Q_PROPERTY(int maxProcessors READ maxProcessors CONSTANT) // hardware threads
@@ -49,6 +57,14 @@ public:
     explicit SimulationController(QObject *parent = nullptr);
     QString stlPath() const { return m_stlPath; }
     QString caseRoot() const { return m_caseRoot; }
+    QString caseRootProblem() const;
+    QString openFoamProblem() const;
+    // Why OpenFOAM cannot use path, or empty: it reads paths with spaces or non-ASCII characters
+    // wrongly or not at all (the Windows build uses the ANSI code page).
+    static QString pathProblem(const QString &path);
+    // Case directory name for a model file: its base name with anything but letters, digits,
+    // '.', '-' and '_' replaced by '_'.
+    static QString caseNameFor(const QString &stlPath);
     CaseSettings *settings() { return &m_settings; }
     QVector3D modelRotation() const { return m_modelRotation; }
     // axis: 0 = x, 1 = y, 2 = z.
@@ -101,8 +117,6 @@ private:
     void watchTimeDirectories(bool enable);
     void onCaseDirectoryChanged();
     void publishLatestTime();
-    void probeParallel();
-    QStringList bashCommand(const QStringList &command) const;
     QString m_stlPath;
     QString m_caseRoot;
     CaseSettings m_settings;
@@ -115,13 +129,19 @@ private:
     QString m_solver = QStringLiteral("pimpleFoam");
     QString m_log;
     QString m_casePath;
-    QString m_openFoamBashrc;
+    OpenFoamEnvironment m_openFoam;
     bool m_parallelAvailable = false;
     QString m_mpiName;
     QString m_resultsPath; // where the solver writes time directories: the case, or processor0
     int m_runProcessors = 1;
     // name.log is written in the case directory; refreshPreview: the case mesh changed.
-    struct Step { QString name; QStringList command; bool refreshPreview = false; };
+    // Steps with an action run it in the app instead of a program (it returns an error or "").
+    struct Step {
+        QString name;
+        OpenFoamEnvironment::Command command;
+        bool refreshPreview = false;
+        std::function<QString()> action;
+    };
     QList<Step> m_steps;
     QFile m_stepLog;
     bool m_stopRequested = false;

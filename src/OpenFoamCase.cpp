@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <numbers>
 
 namespace {
 using json = nlohmann::json;
@@ -89,7 +90,7 @@ using Matrix3 = std::array<std::array<double, 3>, 3>;
 // R = Rz * Ry * Rx: rotate about x, then y, then z, all fixed axes. VtkView's preview uses the same order.
 Matrix3 rotationMatrix(const std::array<double, 3> &degrees)
 {
-    const double r = M_PI / 180.0;
+    const double r = std::numbers::pi / 180.0;
     const double cx = std::cos(degrees[0] * r), sx = std::sin(degrees[0] * r);
     const double cy = std::cos(degrees[1] * r), sy = std::sin(degrees[1] * r);
     const double cz = std::cos(degrees[2] * r), sz = std::sin(degrees[2] * r);

@@ -73,7 +73,32 @@ ApplicationWindow {
         colorMaps: vtkView.colorMaps()
         onThemeSelected: dark => appSettings.darkTheme = dark
         onColorMapSelected: value => appSettings.colorMap = value
+        projectsFolder: simulation.caseRoot
+        projectsFolderProblem: simulation.caseRootProblem
+        onChangeProjectsFolder: projectsFolderDialog.open()
     }
+
+    FolderDialog {
+        id: projectsFolderDialog
+        title: "Choose the projects folder"
+        // Windows: start at the drive root, where a folder without spaces is easy to make.
+        // caseRoot uses '/' separators: /home/... or C:/Users/...
+        currentFolder: Qt.platform.os === "windows" && simulation.caseRootProblem ? "file:///C:/"
+                     : (simulation.caseRoot.startsWith("/") ? "file://" : "file:///") + simulation.caseRoot
+        onAccepted: {
+            simulation.caseRoot = selectedFolder
+            if (!simulation.caseRootProblem) pathWarning.close()
+        }
+    }
+
+    // OpenFOAM cannot use paths with spaces or non-ASCII characters: say so at startup.
+    PathWarningDialog {
+        id: pathWarning
+        folderProblem: simulation.caseRootProblem
+        openFoamProblem: simulation.openFoamProblem
+        onChooseFolder: projectsFolderDialog.open()
+    }
+    Component.onCompleted: if (simulation.caseRootProblem || simulation.openFoamProblem) pathWarning.open()
 
     FileDialog {
         id: stlDialog
