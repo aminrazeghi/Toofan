@@ -218,7 +218,15 @@ EOF
 # 3. Qt plugins and QML modules
 log "Copying Qt plugins"
 for plugin in "${QT_PLUGINS[@]}"; do
-    [ -f "$QT_PLUGIN_DIR/$plugin" ] || die "Qt plugin not found: $QT_PLUGIN_DIR/$plugin"
+    if [ ! -f "$QT_PLUGIN_DIR/$plugin" ]; then
+        # Distributions split some plugins into their own packages.
+        case "$plugin" in
+            platformthemes/libqxdgdesktopportal.so) hint=" (Debian/Ubuntu: apt install qt6-xdgdesktopportal-platformtheme)" ;;
+            platforms/libqwayland.so|wayland-*) hint=" (Debian/Ubuntu: apt install qt6-wayland)" ;;
+            *) hint="" ;;
+        esac
+        die "Qt plugin not found: $QT_PLUGIN_DIR/$plugin$hint"
+    fi
     mkdir -p "$USR/plugins/$(dirname "$plugin")"
     cp "$QT_PLUGIN_DIR/$plugin" "$USR/plugins/$plugin"
 done
