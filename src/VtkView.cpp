@@ -71,6 +71,7 @@ const ColorMap &colorMapNamed(const QString &name)
 #include <vtkUnstructuredGrid.h>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 // One time step of the case as read from disk. Only worker jobs touch it (one at a time): VTK
@@ -191,9 +192,13 @@ std::shared_ptr<const CaseData> loadCaseData(const QString &casePath, double wan
     reader->DisableAllCellArrays();
     reader->DisableAllPointArrays();
     reader->DisableAllLagrangianArrays();
-    for (const FieldInfo &field : kFields)
-        if (reader->GetCellDataArraySelection()->ArrayExists(field.name))
-            reader->SetCellArrayStatus(field.name, 1);
+    // Match by name rather than GetCellDataArraySelection(), which VTK < 9.5 does not expose.
+    for (int i = 0; i < reader->GetNumberOfCellArrays(); ++i) {
+        const char *name = reader->GetCellArrayName(i);
+        for (const FieldInfo &field : kFields)
+            if (name && std::strcmp(name, field.name) == 0)
+                reader->SetCellArrayStatus(name, 1);
+    }
     for (int i = 0; i < reader->GetNumberOfPatchArrays(); ++i) {
         const QString name = QString::fromUtf8(reader->GetPatchArrayName(i));
         const bool wanted = name == QStringLiteral("internalMesh") || name.startsWith(QStringLiteral("patch/"));
