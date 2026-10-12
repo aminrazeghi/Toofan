@@ -74,11 +74,14 @@ Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 Copy-Item $Exe $Stage
 
-Log 'Deploying Qt (windeployqt)'
-& "$QtDir\bin\windeployqt.exe" --release --qmldir "$Root\qml" --no-translations --no-system-d3d-compiler "$Stage\toofan.exe" | Out-Null
-
 Log 'Copying VTK libraries'
 Copy-Item "$VtkPrefix\bin\*.dll" $Stage
+
+# windeployqt only follows the imports of the binaries it is given: toofan.exe does not use Qt
+# Widgets, but VTK's Qt module does (Qt6Widgets, Qt6OpenGLWidgets), so it gets the VTK DLLs too.
+Log 'Deploying Qt (windeployqt)'
+$vtkQt = Get-ChildItem "$Stage\vtk*Qt*.dll" | ForEach-Object FullName
+& "$QtDir\bin\windeployqt.exe" --release --qmldir "$Root\qml" --no-translations --no-system-d3d-compiler "$Stage\toofan.exe" @vtkQt | Out-Null
 
 # The MSVC runtime, next to the executable: no Visual C++ Redistributable install needed.
 Log 'Copying the Visual C++ runtime'
@@ -88,6 +91,23 @@ $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory | S
 if (-not $crt) { throw "Visual C++ runtime not found under $vs\VC\Redist\MSVC" }
 Copy-Item "$($crt.FullName)\*.dll" $Stage
 Info $crt.FullName
+
+# Every DLL that the app, its DLLs and Qt's plugins import must be in the package or in Windows:
+# a missing one only shows up as an error dialog when the app starts.
+Log 'Checking DLL imports'
+$dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -Last 1
+if (-not $dumpbin) { throw "dumpbin.exe not found under $vs" }
+$system32 = Join-Path $env:SystemRoot 'System32'
+$missing = @()
+foreach ($binary in Get-ChildItem -Recurse $Stage -Include *.exe, *.dll) {
+    $imports = & $dumpbin.FullName /nologo /dependents $binary.FullName | Where-Object { $_ -match '^\s+\S+\.dll\s*$' } | ForEach-Object { $_.Trim() }
+    foreach ($dll in $imports) {
+        if ($dll -match '^(api|ext)-ms-') { continue }
+        if ((Test-Path "$Stage\$dll") -or (Test-Path "$($binary.DirectoryName)\$dll") -or (Test-Path "$system32\$dll")) { continue }
+        $missing += "$($binary.FullName.Substring($Stage.Length + 1)) -> $dll"
+    }
+}
+if ($missing) { $missing | ForEach-Object { Info $_ }; throw "$($missing.Count) DLL import(s) not in the package" }
 
 # ---------------------------------------------------------------------------------------------
 # 3. OpenFOAM: etc, the programs the app runs, all DLLs; MS-MPI in the same bin directory, so
