@@ -5,6 +5,8 @@ STL model, choose the inlet speed and mesh resolution, and the app builds an
 OpenFOAM case, meshes it, runs a transient solver and shows the flow while it
 develops.
 
+![Toofan running the cylinder example: the Kármán vortex street on the mid-plane slice, the lift coefficient plot, results and the OpenFOAM log](assets/Screenshot_Toofan.png)
+
 ## Features
 
 - **Model setup**: STL import (ASCII or binary), rotation about x, y and z in
