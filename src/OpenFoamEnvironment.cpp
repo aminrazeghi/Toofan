@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QStandardPaths>
 
 #ifdef Q_OS_WIN
 
@@ -113,9 +114,29 @@ OpenFoamEnvironment::OpenFoamEnvironment()
             if (QFileInfo::exists(candidate)) { m_bashrc = candidate; break; }
         }
     }
-    if (!m_bashrc.isEmpty())
-        m_root = QFileInfo(m_bashrc).absoluteDir().absoluteFilePath(QStringLiteral(".."));
-    m_root = QDir::cleanPath(m_root);
+    if (m_bashrc.isEmpty()) return;
+
+    // Source the bashrc once and keep the environment it leaves (NUL-separated, as values may
+    // contain newlines); every program then starts directly in it. The bashrc treats positional
+    // parameters as config settings, so clear them before sourcing.
+    QProcess shell;
+    shell.start(QStringLiteral("/bin/bash"), {QStringLiteral("-c"),
+                QStringLiteral("rc=\"$1\"; set --; source \"$rc\" >/dev/null 2>&1; exec env -0"),
+                QStringLiteral("toofan"), m_bashrc});
+    if (!shell.waitForFinished(30000) || shell.exitStatus() != QProcess::NormalExit || shell.exitCode() != 0) {
+        shell.kill();
+        return;
+    }
+    QProcessEnvironment environment;
+    for (const QByteArray &entry : shell.readAllStandardOutput().split('\0')) {
+        const qsizetype equals = entry.indexOf('=');
+        if (equals > 0)
+            environment.insert(QString::fromLocal8Bit(entry.left(equals)), QString::fromLocal8Bit(entry.mid(equals + 1)));
+    }
+    // Without WM_PROJECT_DIR the bashrc did not set OpenFOAM up: treat it as not found.
+    if (!environment.contains(QStringLiteral("WM_PROJECT_DIR"))) return;
+    m_environment = environment;
+    m_root = QDir::cleanPath(QFileInfo(m_bashrc).absoluteDir().absoluteFilePath(QStringLiteral("..")));
 }
 
 QString OpenFoamEnvironment::setupHint()
@@ -123,16 +144,9 @@ QString OpenFoamEnvironment::setupHint()
     return QStringLiteral("Set OPENFOAM_BASHRC to its etc/bashrc file.");
 }
 
-namespace {
-// OpenFOAM's bashrc sets WM_PROJECT_DIR, FOAM_* paths, and library paths.
-// Run each program in a fresh sourced shell so the GUI itself need not be launched from one.
-// The bashrc treats positional parameters as config settings, so clear them before sourcing.
-QStringList bashArguments(const QString &bashrc, const QStringList &command)
+QString OpenFoamEnvironment::executable(const QString &name) const
 {
-    return QStringList{QStringLiteral("-c"),
-                       QStringLiteral("rc=\"$1\"; shift; cmd=(\"$@\"); set --; source \"$rc\" >/dev/null && exec \"${cmd[@]}\""),
-                       QStringLiteral("toofan"), bashrc} + command;
-}
+    return QStandardPaths::findExecutable(name, m_environment.value(QStringLiteral("PATH")).split(QLatin1Char(':'), Qt::SkipEmptyParts));
 }
 
 QString OpenFoamEnvironment::start(QProcess *process, const Command &command) const
@@ -144,28 +158,30 @@ QString OpenFoamEnvironment::start(QProcess *process, const Command &command) co
                            QString::number(command.processors), command.program};
     }
     line += command.arguments;
-    process->start(QStringLiteral("/bin/bash"), bashArguments(m_bashrc, line));
+    process->setProcessEnvironment(m_environment);
+    // An unknown program is started by name, so the step fails with "could not start".
+    QString program = executable(command.program);
+    if (program.isEmpty()) program = command.program;
+    if (command.processors > 1) {
+        // mpirun passes its environment on to the processes it starts on this machine.
+        const QString mpirun = executable(QStringLiteral("mpirun"));
+        process->start(mpirun.isEmpty() ? QStringLiteral("mpirun") : mpirun, line.mid(1, 3) + QStringList{program} + command.arguments);
+    } else {
+        process->start(program, command.arguments);
+    }
     return line.join(QLatin1Char(' '));
 }
 
-void OpenFoamEnvironment::probeParallel(QObject *context, const std::function<void(const QString &)> &done) const
+void OpenFoamEnvironment::probeParallel(QObject *, const std::function<void(const QString &)> &done) const
 {
-    if (!found()) { done({}); return; }
     // Parallel runs need an MPI-enabled OpenFOAM (not the "dummy" Pstream) and its mpirun.
-    auto *probe = new QProcess(context);
-    QObject::connect(probe, &QProcess::finished, context, [probe, done](int code, QProcess::ExitStatus status) {
-        const QString mpi = QString::fromLocal8Bit(probe->readAllStandardOutput()).trimmed();
-        done(status == QProcess::NormalExit && code == 0 ? mpi : QString());
-        probe->deleteLater();
-    });
-    probe->start(QStringLiteral("/bin/bash"),
-                 bashArguments(m_bashrc, {QStringLiteral("bash"), QStringLiteral("-c"),
-                                          QStringLiteral("[ -n \"$FOAM_MPI\" ] && [ \"$FOAM_MPI\" != dummy ] && command -v mpirun >/dev/null && echo \"$FOAM_MPI\"")}));
+    const QString mpi = m_environment.value(QStringLiteral("FOAM_MPI"));
+    done(found() && !mpi.isEmpty() && mpi != QStringLiteral("dummy") && !executable(QStringLiteral("mpirun")).isEmpty() ? mpi : QString());
 }
 
 void OpenFoamEnvironment::stop(QProcess *process)
 {
-    // bash has exec'd the program (or mpirun, which passes SIGTERM on to its processes).
+    // The program itself, or mpirun, which passes SIGTERM on to its processes.
     process->terminate();
 }
 

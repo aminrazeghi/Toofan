@@ -1,4 +1,5 @@
 #pragma once
+#include <QProcessEnvironment>
 #include <QString>
 #include <QStringList>
 #include <functional>
@@ -6,10 +7,10 @@
 class QObject;
 class QProcess;
 
-// Locates OpenFOAM and starts its programs.
-// Linux: each program runs in a fresh bash that sources OpenFOAM's etc/bashrc; parallel runs
-// use Open MPI's mpirun. Windows (OpenCFD's MinGW build): programs run directly with the few
-// variables OpenFOAM reads set (as its setEnvVariables .bat does); parallel runs use MS-MPI's
+// Locates OpenFOAM and starts its programs directly, in OpenFOAM's environment.
+// Linux: the environment is what OpenFOAM's etc/bashrc sets up, captured once from a bash that
+// sources it; parallel runs use Open MPI's mpirun. Windows (OpenCFD's MinGW build): the few
+// variables OpenFOAM reads (as its setEnvVariables .bat sets them); parallel runs use MS-MPI's
 // mpiexec from OpenFOAM's bin directory.
 class OpenFoamEnvironment {
 public:
@@ -41,5 +42,7 @@ private:
     QString m_version;   // WM_PROJECT_VERSION, e.g. v2606
 #else
     QString m_bashrc;
+    QProcessEnvironment m_environment;  // after sourcing m_bashrc
+    QString executable(const QString &name) const;  // in m_environment's PATH, or ""
 #endif
 };

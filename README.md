@@ -70,11 +70,13 @@ VTK installed elsewhere, pass `-DVTK_DIR=<prefix>/lib/cmake/vtk-X.Y` or
 
 The app does not need to be started from an OpenFOAM shell.
 
-- **Linux**: each step runs in a fresh bash that sources OpenFOAM's own
-  `etc/bashrc`, looked up in this order: the `OPENFOAM_BASHRC` environment
-  variable, a copy bundled with the app (`<app>/../openfoam/etc/bashrc`), the
-  newest `/usr/lib/openfoam/openfoam*/etc/bashrc`. Parallel steps run under
-  Open MPI's `mpirun`.
+- **Linux**: at startup the app sources OpenFOAM's own `etc/bashrc` once in
+  bash and keeps the environment it sets up; every step then starts the
+  OpenFOAM program directly in that environment. The bashrc is looked up in
+  this order: the `OPENFOAM_BASHRC` environment variable, a copy bundled with
+  the app (`<app>/../openfoam/etc/bashrc`), the newest
+  `/usr/lib/openfoam/openfoam*/etc/bashrc`. Parallel steps run under Open
+  MPI's `mpirun`.
 - **Windows**: OpenCFD's MinGW build of OpenFOAM, from the `OPENFOAM_DIR`
   environment variable (an `OpenFOAM-v<version>` directory) or bundled next to
   `toofan.exe`. The programs run directly with `WM_PROJECT_DIR` and `PATH` set,
