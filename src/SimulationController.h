@@ -57,6 +57,8 @@ class SimulationController : public QObject {
     Q_PROPERTY(QVariantList examples READ examples CONSTANT)
 public:
     explicit SimulationController(QObject *parent = nullptr);
+    // Ends a running step (e.g. when the window is closed), so no OpenFOAM or MPI processes outlive the app.
+    ~SimulationController() override;
     QString stlPath() const { return m_stlPath; }
     QString caseRoot() const { return m_caseRoot; }
     QString caseRootProblem() const;

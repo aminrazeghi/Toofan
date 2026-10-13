@@ -81,6 +81,20 @@ SimulationController::SimulationController(QObject *parent)
     });
 }
 
+SimulationController::~SimulationController()
+{
+    // The handlers use members that are being destroyed: a dying process must not start the next step.
+    m_process.disconnect();
+    if (m_process.state() == QProcess::NotRunning) return;
+    // As Stop does first: a plain kill would leave mpirun's (Linux) or smpd's (Windows) solver
+    // processes running; then kill whatever is left.
+    OpenFoamEnvironment::stop(&m_process);
+    if (!m_process.waitForFinished(5000)) {
+        m_process.kill();
+        m_process.waitForFinished(2000);
+    }
+}
+
 int SimulationController::maxProcessors() { return std::max(QThread::idealThreadCount(), 1); }
 
 QString SimulationController::pathProblem(const QString &path)
