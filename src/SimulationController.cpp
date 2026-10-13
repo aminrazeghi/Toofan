@@ -4,8 +4,11 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QThread>
 #include <QUrl>
 
@@ -178,6 +181,57 @@ void SimulationController::newProject()
     m_status = QStringLiteral("Ready"); emit statusChanged();
 }
 
+namespace {
+const QString kExampleRoot = QStringLiteral(":/examples");
+
+QJsonObject readExample(const QString &id)
+{
+    QFile file(kExampleRoot + QLatin1Char('/') + id + QStringLiteral("/example.json"));
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    return QJsonDocument::fromJson(file.readAll()).object();
+}
+}
+
+QVariantList SimulationController::examples()
+{
+    QVariantList list;
+    for (const QString &id : QDir(kExampleRoot).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+        const QJsonObject example = readExample(id);
+        if (example.isEmpty()) continue;
+        list.append(QVariantMap{{QStringLiteral("id"), id},
+                                {QStringLiteral("title"), example[QStringLiteral("title")].toString()},
+                                {QStringLiteral("description"), example[QStringLiteral("description")].toString()}});
+    }
+    return list;
+}
+
+void SimulationController::openExample(const QString &id)
+{
+    if (m_process.state() != QProcess::NotRunning) return;
+    const QJsonObject example = readExample(id);
+    const QString model = example[QStringLiteral("model")].toString();
+    if (model.isEmpty()) { appendLog(QStringLiteral("Example %1 not found.").arg(id)); return; }
+    // The preview and the case setup read the model from a file: copy it out of the app.
+    const QDir dir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + QStringLiteral("/examples"));
+    const QString stl = dir.filePath(model);
+    QFile::remove(stl);
+    if (!dir.mkpath(QStringLiteral(".")) || !QFile::copy(kExampleRoot + QLatin1Char('/') + id + QLatin1Char('/') + model, stl)) {
+        appendLog(QStringLiteral("Cannot copy the example model to %1.").arg(stl)); return;
+    }
+    QFile::setPermissions(stl, QFile::ReadOwner | QFile::WriteOwner | QFile::ReadGroup | QFile::ReadOther);
+
+    newProject();
+    setStlPath(stl);
+    setSpeed(example[QStringLiteral("speed")].toDouble(kDefaultSpeed));
+    setMeshQuality(example[QStringLiteral("meshQuality")].toString(QString::fromLatin1(kDefaultMeshQuality)));
+    const QJsonObject settings = example[QStringLiteral("settings")].toObject();
+    for (auto it = settings.begin(); it != settings.end(); ++it) {
+        if (!m_settings.setProperty(it.key().toUtf8().constData(), it.value().toVariant()))
+            appendLog(QStringLiteral("Example %1: unknown setting %2.").arg(id, it.key()));
+    }
+    appendLog(QStringLiteral("Example: %1. %2").arg(example[QStringLiteral("title")].toString(), example[QStringLiteral("description")].toString()));
+}
+
 void SimulationController::openCaseFolder()
 {
     // Before a run, the model's previous case if there is one.
@@ -228,6 +282,16 @@ void SimulationController::startSimulation()
     }};
     m_steps = {{QStringLiteral("blockMesh"), {QStringLiteral("blockMesh")}, true},
                {QStringLiteral("surfaceFeatureExtract"), {QStringLiteral("surfaceFeatureExtract")}}};
+    // 2D: the slab snappyHexMesh meshed becomes one cell thick (a serial step, on the whole mesh).
+    QList<Step> extrude;
+    if (options.twoDimensional)
+        extrude = {{QStringLiteral("extrudeMesh"), {QStringLiteral("extrudeMesh")}},
+                   {QStringLiteral("finish2DMesh"), {}, true, [this, casePath] {
+                        const QString error = OpenFoamCase::finishTwoDimensionalMesh(casePath);
+                        // snappyHexMesh reported the slab's cells; show the 2D mesh's.
+                        if (error.isEmpty()) { m_cellCount = OpenFoamCase::meshCellCount(casePath); scheduleMonitorUpdate(); }
+                        return error;
+                    }}};
     if (options.processors > 1) {
         // Mesh in parallel, then reassemble the mesh (for the preview, and so the fields are
         // decomposed together with it), decompose again with the fields and solve in parallel.
@@ -235,16 +299,18 @@ void SimulationController::startSimulation()
         const QString parallel = QStringLiteral("-parallel");
         m_steps += {{QStringLiteral("decomposeMesh"), {QStringLiteral("decomposePar"), {QStringLiteral("-force")}}},
                     {QStringLiteral("snappyHexMesh"), {QStringLiteral("snappyHexMesh"), {QStringLiteral("-overwrite"), parallel}, n}},
-                    {QStringLiteral("reconstructParMesh"), {QStringLiteral("reconstructParMesh"), {QStringLiteral("-constant")}}, true},
-                    copyFields,
+                    {QStringLiteral("reconstructParMesh"), {QStringLiteral("reconstructParMesh"), {QStringLiteral("-constant")}}, true}};
+        m_steps += extrude;
+        m_steps += {copyFields,
                     {QStringLiteral("decomposePar"), {QStringLiteral("decomposePar"), {QStringLiteral("-force")}}},
                     {m_solver, {m_solver, {parallel}, n}},
                     {QStringLiteral("reconstructPar"), {QStringLiteral("reconstructPar")}, true}};
         m_resultsPath = QDir(m_casePath).filePath(QStringLiteral("processor0"));
         m_runProcessors = options.processors;
     } else {
-        m_steps += {{QStringLiteral("snappyHexMesh"), {QStringLiteral("snappyHexMesh"), {QStringLiteral("-overwrite")}}, true},
-                    copyFields,
+        m_steps += {{QStringLiteral("snappyHexMesh"), {QStringLiteral("snappyHexMesh"), {QStringLiteral("-overwrite")}}, true}};
+        m_steps += extrude;
+        m_steps += {copyFields,
                     {m_solver, {m_solver}}};
         m_resultsPath = m_casePath;
         m_runProcessors = 1;
@@ -278,6 +344,8 @@ void SimulationController::runNextStep()
                 m_status = QStringLiteral("Failed"); emit statusChanged(); return;
             }
             finishStep(QStringLiteral("%1 finished.").arg(name));
+            if (m_steps[m_step].refreshPreview)
+                setPreviewRevision(m_previewRevision + 1);
             ++m_step;
             runNextStep();
         }, Qt::QueuedConnection);

@@ -31,7 +31,7 @@ MAKE_TAR=1
 
 # OpenFOAM programs the app runs; everything they load comes along.
 OPENFOAM_PROGRAMS=(blockMesh surfaceFeatureExtract snappyHexMesh pimpleFoam rhoPimpleFoam checkMesh foamDictionary
-                   decomposePar reconstructPar reconstructParMesh)
+                   decomposePar reconstructPar reconstructParMesh extrudeMesh)
 # Open MPI programs: mpirun starts prterun, which launches the processes on this machine.
 OPENMPI_PROGRAMS=(mpirun mpiexec prterun prted prte ompi_info)
 

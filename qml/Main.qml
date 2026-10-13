@@ -100,6 +100,17 @@ ApplicationWindow {
     }
     Component.onCompleted: if (simulation.caseRootProblem || simulation.openFoamProblem) pathWarning.open()
 
+    ExamplesDialog {
+        id: examplesDialog
+        examples: simulation.examples
+        busy: simulation.running
+        onExampleSelected: id => {
+            simulation.openExample(id)
+            setupPanel.userCollapsed = false
+            openPlot = ""
+        }
+    }
+
     FileDialog {
         id: stlDialog
         title: "Choose a model"
@@ -175,6 +186,7 @@ ApplicationWindow {
             casePath: simulation.casePath
             previewRevision: simulation.previewRevision
             modelRotation: simulation.modelRotation
+            twoDimensional: simulation.settings.twoDimensional
             colorMap: appSettings.colorMap
             darkTheme: Theme.dark
             // Covered window edges, from the panels' resting sizes (not their animations).
@@ -197,6 +209,13 @@ ApplicationWindow {
             Label { text: "◌"; color: Theme.accent; font.pixelSize: 54; anchors.horizontalCenter: parent.horizontalCenter }
             Label { text: "Your model preview"; color: Theme.textStrong; font.pixelSize: 17; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
             Label { text: "Choose an STL to inspect it in 3D."; color: muted; font.pixelSize: 13; anchors.horizontalCenter: parent.horizontalCenter }
+            Button {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "Or open an example"
+                onClicked: examplesDialog.open()
+                contentItem: Text { text: parent.text; color: accent; font.pixelSize: 13; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle { radius: 9; color: parent.hovered ? Theme.controlHover : "transparent"; border.color: Theme.controlBorder; implicitWidth: 170; implicitHeight: 34 }
+            }
         }
 
         // ---- Title bar area: the top strip of the window moves it, like a native title bar ----
@@ -265,6 +284,14 @@ ApplicationWindow {
                     }
                     contentItem: Item { IconGlyph { anchors.centerIn: parent; kind: "plus"; color: parent.parent.enabled ? Theme.muted : Theme.faint } }
                     background: Rectangle { radius: 9; color: parent.hovered ? Theme.controlHover : "transparent"; implicitWidth: 38; implicitHeight: 38 }
+                }
+                ToolButton {
+                    text: "Examples"
+                    ToolTip.visible: hovered; ToolTip.text: "Open a ready-made example"
+                    onClicked: examplesDialog.open()
+                    contentItem: Text { text: parent.text; color: Theme.muted; font.pixelSize: 13; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle { radius: 9; color: parent.hovered ? Theme.controlHover : "transparent"; implicitWidth: 38; implicitHeight: 38 }
+                    leftPadding: 10; rightPadding: 10
                 }
                 ToolButton {
                     ToolTip.visible: hovered

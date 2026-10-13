@@ -20,11 +20,13 @@ set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(toofan URI Toofan VERSION 1.0 QML_FILES
   qml/Main.qml qml/MetricCard.qml qml/LinePlot.qml qml/SegmentedControl.qml
   qml/Theme.qml qml/NumberField.qml qml/AdvancedSettings.qml qml/SettingsDialog.qml qml/OrientationControl.qml
-  qml/AboutDialog.qml qml/FloatingPanel.qml qml/IconGlyph.qml qml/PathWarningDialog.qml)
+  qml/AboutDialog.qml qml/FloatingPanel.qml qml/IconGlyph.qml qml/PathWarningDialog.qml qml/ExamplesDialog.qml)
 qt_add_resources(toofan app_assets PREFIX "/" FILES assets/toofan-icon.svg assets/toofan-logo.svg)
 file(GLOB_RECURSE TOOFAN_CASE_TEMPLATES CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" templates/windTunnel/*)
 list(FILTER TOOFAN_CASE_TEMPLATES EXCLUDE REGEX "\\.md$")
 qt_add_resources(toofan case_templates PREFIX "/" FILES ${TOOFAN_CASE_TEMPLATES})
+file(GLOB_RECURSE TOOFAN_EXAMPLES CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" examples/*/example.json examples/*/*.stl)
+qt_add_resources(toofan examples PREFIX "/" FILES ${TOOFAN_EXAMPLES})
 target_include_directories(toofan PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(WIN32)
   # No console window, the icon in the executable, and the sources read as UTF-8 (MSVC).

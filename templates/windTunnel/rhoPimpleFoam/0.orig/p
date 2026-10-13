@@ -14,6 +14,7 @@ internalField   uniform {{ flow.p }};
 
 boundaryField
 {
+{% include "emptyPatches" %}
     inlet
     {
         type            zeroGradient;

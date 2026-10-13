@@ -14,6 +14,7 @@ internalField   uniform {{ flow.k }};
 
 boundaryField
 {
+{% include "emptyPatches" %}
     inlet
     {
         type            fixedValue;

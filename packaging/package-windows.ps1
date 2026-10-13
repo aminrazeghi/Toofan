@@ -28,7 +28,7 @@ $Stage = Join-Path $Work 'Toofan'
 # OpenFOAM programs the app runs; all of OpenFOAM's DLLs come along (solvers load function
 # objects, models and boundary conditions at run time).
 $OpenFoamPrograms = 'blockMesh', 'surfaceFeatureExtract', 'snappyHexMesh', 'pimpleFoam', 'rhoPimpleFoam', 'checkMesh',
-                    'foamDictionary', 'decomposePar', 'reconstructPar', 'reconstructParMesh'
+                    'foamDictionary', 'decomposePar', 'reconstructPar', 'reconstructParMesh', 'extrudeMesh'
 
 function Log($message) { Write-Host "==> $message" -ForegroundColor Cyan }
 function Info($message) { Write-Host "    $message" }

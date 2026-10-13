@@ -14,6 +14,7 @@ internalField   uniform 0;
 
 boundaryField
 {
+{% include "emptyPatches" %}
     "(inlet|outlet|tunnelWalls)"
     {
         type            calculated;

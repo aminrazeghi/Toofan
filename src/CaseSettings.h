@@ -26,6 +26,8 @@ class CaseSettings : public QObject {
     Q_PROPERTY(double maxCourant MEMBER maxCourant NOTIFY changed)     // 0: automatic per solver
     Q_PROPERTY(int writeCount MEMBER writeCount NOTIFY changed)        // result time steps written per run
     Q_PROPERTY(int surfaceLayers MEMBER surfaceLayers NOTIFY changed)  // prism layers on the model, 0 = none
+    // 2D: the model is a section extruded along y spanning the tunnel (e.g. a cylinder or an aerofoil)
+    Q_PROPERTY(bool twoDimensional MEMBER twoDimensional NOTIFY changed)
     // Parallel run: MPI processes for snappyHexMesh and the solver (1 = serial).
     Q_PROPERTY(int processors MEMBER processors NOTIFY changed)
 
@@ -49,6 +51,7 @@ public:
     double maxCourant = 0.0;
     int writeCount = 60;
     int surfaceLayers = 3;
+    bool twoDimensional = false;
     int processors = defaultProcessors();
 
 signals:

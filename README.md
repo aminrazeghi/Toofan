@@ -22,9 +22,16 @@ develops.
   `snappyHexMesh` and the solver run under `mpirun`, and the mesh and results
   are reconstructed afterwards. The 3D view follows the solver while it writes
   into `processor*/`. Needs an OpenFOAM with Open MPI (the packages bundle one).
+- **2D sections**: for a model extruded along y (a cylinder, an aerofoil) the
+  tunnel spans the model and is sized from its x-z section (10 section lengths
+  upstream, 25 downstream, 10 to each side). `snappyHexMesh` meshes a slab one
+  background cell thick, `extrudeMesh` turns it into a one-cell-thick mesh, and
+  front and back become `empty`.
 - **Advanced settings**: turbulence model (k-ω SST, k-ε, realizable k-ε,
   Spalart-Allmaras, laminar), inlet turbulence, fluid properties, run length,
-  Courant limit, write count, surface layers and processor count.
+  Courant limit, write count, surface layers, 2D and processor count.
+- **Examples**: ready-made cases (model and settings) in the Examples dialog;
+  see [Examples](#examples).
 - **Live monitoring**: drag and lift coefficients and solver residuals are
   plotted while the solver runs.
 - **3D results** (VTK): full domain, mid-plane slice or streamlines, colored by
@@ -120,6 +127,39 @@ installer (Inno Setup) installs per user into a folder without spaces
 or non-ASCII character) and refuses folders OpenFOAM cannot run from; its license
 page shows the MS-MPI redistributable terms. The executable icon is
 `assets/toofan.ico`, rendered from `assets/toofan-icon.svg`.
+
+## Examples
+
+Ready-to-run examples: an STL with saved settings (speed, fluid, turbulence model,
+mesh quality, run length), opened from **Examples** in the toolbar. Checked items
+are in the app. Each lives in `examples/<id>/`: the STL and an `example.json`
+whose `settings` are Advanced settings properties (see `src/CaseSettings.h`).
+
+Low Reynolds number, laminar, unsteady wakes:
+
+- [x] **Flow over a cylinder, Re = 300** (`examples/cylinder-re300`): a 2D case,
+  D = 0.1 m at 3 m/s in a glycerine-like fluid (ν = 0.001 m²/s), laminar. Kármán
+  vortex street and oscillating lift; 2D simulations give St ≈ 0.21 and
+  Cd ≈ 1.35 at this Re (the real flow is already 3D there, with St ≈ 0.20).
+- [ ] **Sphere, Re = 300**: periodic hairpin vortex shedding (Johnson & Patel 1999);
+  expect Cd ≈ 0.66, St ≈ 0.135.
+- [ ] **Square cylinder or flat plate normal to the flow, Re ≈ 200**: shedding from
+  fixed separation points; expect St ≈ 0.15 (square), Cd ≈ 2 (plate).
+
+High Reynolds number, turbulent (k-ω SST):
+
+- [ ] **Ahmed body, 25° slant**: L = 1.044 m at 40 m/s, C-pillar vortices; expect
+  Cd ≈ 0.28–0.30 (free air until the tunnel has a ground).
+- [ ] **Finite wing, NACA 0012 at α = 8°, aspect ratio ~4**: tip vortices, lift and
+  drag; expect CL ≈ 0.5–0.6.
+- [ ] **Cube, Re ~ 10⁴**: a quick first run; horseshoe vortex and separated wake.
+
+Compressible:
+
+- [ ] **Sphere or slender body at Mach 0.5–0.8** (`rhoPimpleFoam`): density and
+  temperature fields.
+- [ ] **Supersonic flow over an F-18**: shock waves around the aircraft. Needs a
+  supersonic solver template; the app stops at Mach 1 today.
 
 ## Status
 

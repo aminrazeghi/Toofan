@@ -53,6 +53,8 @@ class SimulationController : public QObject {
     // Same shape, one series each: force coefficient history per time step.
     Q_PROPERTY(QVariantList dragHistory READ dragHistory NOTIFY monitorsChanged)
     Q_PROPERTY(QVariantList liftHistory READ liftHistory NOTIFY monitorsChanged)
+    // Ready-made cases bundled with the app (examples/<id>/example.json): [{id, title, description}].
+    Q_PROPERTY(QVariantList examples READ examples CONSTANT)
 public:
     explicit SimulationController(QObject *parent = nullptr);
     QString stlPath() const { return m_stlPath; }
@@ -96,6 +98,9 @@ public:
     Q_INVOKABLE void startSimulation();
     // Clears the model, results and log and restores default settings. Cases on disk are kept.
     Q_INVOKABLE void newProject();
+    // Starts a new project from a bundled example: its model and settings.
+    Q_INVOKABLE void openExample(const QString &id);
+    static QVariantList examples();
     // Opens the current case directory (or, before a run, the case root) in the file manager.
     Q_INVOKABLE void openCaseFolder();
     Q_INVOKABLE void stopSimulation();

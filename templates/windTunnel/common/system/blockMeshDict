@@ -49,6 +49,29 @@ boundary
         type patch;
         faces ((1 2 6 5));
     }
+{% if twoD.enabled %}
+    // 2D: snappyHexMesh meshes this slab and extrudeMesh turns front into the one-cell mesh;
+    // both become empty after that (as empty here, snappyHexMesh would treat the slab as 2D).
+    front
+    {
+        type patch;
+        faces ((0 1 5 4));
+    }
+    back
+    {
+        type patch;
+        faces ((3 7 6 2));
+    }
+    tunnelWalls
+    {
+        type patch;
+        faces
+        (
+            (0 3 2 1)
+            (4 5 6 7)
+        );
+    }
+{% else %}
     tunnelWalls
     {
         type patch;
@@ -60,6 +83,7 @@ boundary
             (4 5 6 7)
         );
     }
+{% endif %}
 );
 
 // ************************************************************************* //

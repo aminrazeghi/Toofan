@@ -1,0 +1,16 @@
+{
+    "title": "Flow over a cylinder, Re = 300",
+    "description": "A 0.1 m cylinder in a glycerine-like fluid (ν = 0.001 m²/s) at 3 m/s: Re = UD/ν = 300. The wake rolls up into a Kármán vortex street and the lift oscillates at the shedding frequency, St = fD/U ≈ 0.2. A 2D case: change the speed to change Re.",
+    "model": "cylinder-Re300.stl",
+    "speed": 3.0,
+    "meshQuality": "Coarse",
+    "settings": {
+        "turbulenceModel": "laminar",
+        "density": 1260,
+        "kinematicViscosity": 0.001,
+        "twoDimensional": true,
+        "surfaceLayers": 0,
+        "flowThroughs": 2.5,
+        "writeCount": 120
+    }
+}

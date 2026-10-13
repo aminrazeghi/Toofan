@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMap>
+#include <QRegularExpression>
 #include <QtEndian>
 #include <algorithm>
 #include <array>
@@ -171,20 +172,31 @@ json buildTemplateData(const CaseOptions &options, const QString &solver, const 
 {
     const bool fine = options.meshQuality == QStringLiteral("Fine");
     const bool compressible = solver != QStringLiteral("pimpleFoam");
-    const double length = std::max({model.extent(0), model.extent(1), model.extent(2)});
+    const bool twoD = options.twoDimensional;
+    // In 2D the model's size is its x-z section; its extent along y is the span.
+    const double length = twoD ? std::max(model.extent(0), model.extent(2)) : std::max({model.extent(0), model.extent(1), model.extent(2)});
     const double baseCell = length / (fine ? 6.0 : 4.0);
-    const int surfaceLevelMin = fine ? 4 : 3;
+    // A 2D mesh is cheap: resolve the model's boundary layer and the wake much more finely.
+    const int surfaceLevelMin = twoD ? (fine ? 5 : 4) : (fine ? 4 : 3);
     const int surfaceLevelMax = surfaceLevelMin + 1;
+    const int boxLevel = twoD ? 3 : 2;
 
-    const std::array<double, 6> tunnel = OpenFoamCase::tunnelBounds({model.min[0], model.max[0], model.min[1], model.max[1], model.min[2], model.max[2]});
+    std::array<double, 6> tunnel = OpenFoamCase::tunnelBounds({model.min[0], model.max[0], model.min[1], model.max[1], model.min[2], model.max[2]}, twoD);
+    if (twoD) {
+        // snappyHexMesh meshes a slab one background cell thick in the middle of the span; the
+        // model crosses it, and extrudeMesh then turns its front face into the one-cell-thick mesh.
+        tunnel[2] = model.center(1) - 0.5 * baseCell;
+        tunnel[3] = model.center(1) + 0.5 * baseCell;
+    }
     const std::array<double, 3> lo{tunnel[0], tunnel[2], tunnel[4]};
     const std::array<double, 3> hi{tunnel[1], tunnel[3], tunnel[5]};
     std::array<int, 3> cells{};
     std::array<double, 3> location{};
     for (int i = 0; i < 3; ++i) {
-        cells[i] = std::max(1, int(std::ceil((hi[i] - lo[i]) / baseCell)));
-        // Inside the second background cell near the inlet corner, off every face at all refinement levels.
-        location[i] = lo[i] + 1.4321 * (hi[i] - lo[i]) / cells[i];
+        cells[i] = twoD && i == 1 ? 1 : std::max(1, int(std::ceil((hi[i] - lo[i]) / baseCell)));
+        // Inside the second background cell near the inlet corner (the first one across a 2D
+        // slab), off every face at all refinement levels.
+        location[i] = lo[i] + (cells[i] > 1 ? 1.4321 : 0.4321) * (hi[i] - lo[i]) / cells[i];
     }
 
     const double speed = std::max(options.inletSpeed, 1e-3);
@@ -214,7 +226,8 @@ json buildTemplateData(const CaseOptions &options, const QString &solver, const 
     const double maxCo = options.maxCourant > 0 ? options.maxCourant : (compressible ? 1.0 : 2.0);
 
     const double lRef = model.extent(0) > 0 ? model.extent(0) : length;
-    const double frontalArea = model.extent(1) * model.extent(2);
+    const double thickness = hi[1] - lo[1]; // of the 2D mesh
+    const double frontalArea = model.extent(2) * (twoD ? thickness : model.extent(1));
 
     json data;
     data["solver"] = solver.toStdString();
@@ -241,12 +254,15 @@ json buildTemplateData(const CaseOptions &options, const QString &solver, const 
         {"nx", cells[0]}, {"ny", cells[1]}, {"nz", cells[2]},
         {"length", round6(tunnelLength)},
     };
+    data["twoD"] = {{"enabled", twoD}, {"thickness", round6(thickness)}};
+    // Around the model and its near wake; in 2D the whole vortex street, across the slab.
+    const double wake = twoD ? 10.0 : 2.0, side = twoD ? 2.0 : 0.5;
     data["mesh"] = {
         {"surfaceLevelMin", surfaceLevelMin}, {"surfaceLevelMax", surfaceLevelMax},
-        {"featureLevel", surfaceLevelMax}, {"boxLevel", 2},
+        {"featureLevel", surfaceLevelMax}, {"boxLevel", boxLevel},
         {"refinementBox", {
-            {"min", vec(model.min[0] - 0.5 * length, model.min[1] - 0.5 * length, model.min[2] - 0.5 * length)},
-            {"max", vec(model.max[0] + 2.0 * length, model.max[1] + 0.5 * length, model.max[2] + 0.5 * length)},
+            {"min", vec(model.min[0] - 0.5 * length, twoD ? lo[1] - thickness : model.min[1] - 0.5 * length, model.min[2] - side * length)},
+            {"max", vec(model.max[0] + wake * length, twoD ? hi[1] + thickness : model.max[1] + 0.5 * length, model.max[2] + side * length)},
         }},
         {"locationInMesh", vec(location[0], location[1], location[2])},
         {"maxGlobalCells", fine ? 8000000 : 2000000}, {"maxLocalCells", fine ? 8000000 : 2000000},
@@ -391,8 +407,16 @@ QString OpenFoamCase::solverForSpeed(double speed, double temperature)
     return QStringLiteral("sonicFoam");
 }
 
-std::array<double, 6> OpenFoamCase::tunnelBounds(const std::array<double, 6> &model)
+std::array<double, 6> OpenFoamCase::tunnelBounds(const std::array<double, 6> &model, bool twoDimensional)
 {
+    if (twoDimensional) {
+        // A section's wake (a vortex street) is long and blockage matters more: 10 section lengths
+        // upstream, 25 downstream, 10 on each side; along y the model's span.
+        const double length = std::max(model[1] - model[0], model[5] - model[4]);
+        return {model[0] - 10.0 * length, model[1] + 25.0 * length,
+                model[2], model[3],
+                model[4] - 10.0 * length, model[5] + 10.0 * length};
+    }
     // 3 model lengths upstream, 8 downstream, 2.5 on each side.
     const double length = std::max({model[1] - model[0], model[3] - model[2], model[5] - model[4]});
     return {model[0] - 3.0 * length, model[1] + 8.0 * length,
@@ -403,6 +427,33 @@ std::array<double, 6> OpenFoamCase::tunnelBounds(const std::array<double, 6> &mo
 QString OpenFoamCase::defaultCaseRoot()
 {
     return QDir::home().filePath(QStringLiteral("Toofan-Projects"));
+}
+
+QString OpenFoamCase::finishTwoDimensionalMesh(const QString &casePath)
+{
+    const QDir mesh(QDir(casePath).filePath(QStringLiteral("constant/polyMesh")));
+    for (const QString &stale : {QStringLiteral("cellLevel"), QStringLiteral("pointLevel"), QStringLiteral("level0Edge"), QStringLiteral("surfaceIndex")})
+        QFile::remove(mesh.filePath(stale));
+
+    // The boundary file as OpenFOAM writes it: "name { type patch; nFaces ...; }" for each patch.
+    QFile file(mesh.filePath(QStringLiteral("boundary")));
+    if (!file.open(QIODevice::ReadOnly)) return QStringLiteral("Cannot read %1: %2").arg(file.fileName(), file.errorString());
+    QString boundary = QString::fromUtf8(file.readAll());
+    file.close();
+    static const QRegularExpression patchType(QStringLiteral("(\\b(front|back)\\s*\\{[^}]*?\\btype\\s+)\\w+;"));
+    if (boundary.count(patchType) != 2) return QStringLiteral("No front and back patches in %1.").arg(file.fileName());
+    boundary.replace(patchType, QStringLiteral("\\1empty;"));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(boundary.toUtf8()) < 0)
+        return QStringLiteral("Cannot write %1: %2").arg(file.fileName(), file.errorString());
+    return {};
+}
+
+int OpenFoamCase::meshCellCount(const QString &casePath)
+{
+    QFile owner(QDir(casePath).filePath(QStringLiteral("constant/polyMesh/owner")));
+    if (!owner.open(QIODevice::ReadOnly)) return 0;
+    static const QRegularExpression cells(QStringLiteral("nCells:\\s*(\\d+)"));
+    return cells.match(QString::fromLatin1(owner.read(2048))).captured(1).toInt();
 }
 
 bool OpenFoamCase::prepare(const CaseOptions &options, QString *message)
@@ -435,12 +486,19 @@ bool OpenFoamCase::prepare(const CaseOptions &options, QString *message)
     // The tunnel is sized around the model as it will be meshed.
     Bounds model;
     if (!readStlBounds(surfacePath, &model, error)) return false;
+    if (options.twoDimensional && model.extent(1) < 0.5 * std::max(model.extent(0), model.extent(2))) {
+        *error = QStringLiteral("2D needs a model extruded along y (the span), at least half as long as its x-z section; turn 2D off in Advanced settings or rotate the model.");
+        return false;
+    }
     const json data = buildTemplateData(options, solver, model);
     if (!renderTemplates(data, solver, root, error)) return false;
 
     const json &domain = data["domain"];
-    *error = QStringLiteral("Prepared %1 wind tunnel case in %2 (%3 x %4 x %5 background cells).")
-                 .arg(solver, root.path())
-                 .arg(domain["nx"].get<int>()).arg(domain["ny"].get<int>()).arg(domain["nz"].get<int>());
+    *error = options.twoDimensional
+                 ? QStringLiteral("Prepared %1 2D wind tunnel case in %2 (%3 x %4 background cells).")
+                       .arg(solver, root.path()).arg(domain["nx"].get<int>()).arg(domain["nz"].get<int>())
+                 : QStringLiteral("Prepared %1 wind tunnel case in %2 (%3 x %4 x %5 background cells).")
+                       .arg(solver, root.path())
+                       .arg(domain["nx"].get<int>()).arg(domain["ny"].get<int>()).arg(domain["nz"].get<int>());
     return true;
 }

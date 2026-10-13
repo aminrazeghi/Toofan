@@ -1,0 +1,10 @@
+{% if twoD.enabled %}
+    front
+    {
+        type            empty;
+    }
+    back
+    {
+        type            empty;
+    }
+{% endif %}

@@ -401,6 +401,7 @@ public:
     vtkNew<vtkAxesActor> axes;                   // X/Y/Z marker at the inlet corner
     vtkSmartPointer<vtkPolyData> rawStl;         // STL as read, before rotation
     QVector3D rotation;                          // rotation applied in stlMapper
+    bool twoDimensional = false;                 // tunnel preview drawn for a 2D case
     double tunnelView[6] = {0, -1, 0, -1, 0, -1}; // tunnel plus inlet arrow, for framing
     QString stlPath;                             // STL currently in stlMapper
     bool hasStl = false;
@@ -413,6 +414,7 @@ vtkStandardNewMacro(PreviewScene);
 struct SceneState {
     QString stlPath;
     QVector3D rotation;
+    bool twoDimensional = false;
     QVector4D insets;  // left, top, right, bottom
     QSizeF size;       // item size, same units as insets
     std::shared_ptr<const CasePreview> preview;
@@ -554,13 +556,13 @@ double visibleFraction(const SceneState &state)
 
 // Box of the computational domain (as blockMesh will build it), its inlet face and an arrow
 // showing the flow entering the tunnel.
-void buildTunnelPreview(PreviewScene *scene, vtkPolyData *model)
+void buildTunnelPreview(PreviewScene *scene, vtkPolyData *model, bool twoDimensional)
 {
     double modelBounds[6];
     model->GetBounds(modelBounds);
     std::array<double, 6> m;
     std::copy(modelBounds, modelBounds + 6, m.begin());
-    const std::array<double, 6> t = OpenFoamCase::tunnelBounds(m);
+    const std::array<double, 6> t = OpenFoamCase::tunnelBounds(m, twoDimensional);
 
     vtkNew<vtkOutlineSource> outline;
     outline->SetBounds(t.data());
@@ -575,7 +577,8 @@ void buildTunnelPreview(PreviewScene *scene, vtkPolyData *model)
     scene->inletMapper->SetInputData(inlet->GetOutput());
 
     // Arrow ending just short of the inlet face, centred on it, pointing +x into the domain.
-    const double arrowLength = 0.35 * std::min(t[3] - t[2], t[5] - t[4]);
+    // (A 2D tunnel is only as wide as the model's span: size the arrow from its height.)
+    const double arrowLength = twoDimensional ? 0.15 * (t[5] - t[4]) : 0.35 * std::min(t[3] - t[2], t[5] - t[4]);
     const double yc = 0.5 * (t[2] + t[3]), zc = 0.5 * (t[4] + t[5]);
     vtkNew<vtkArrowSource> arrow;
     arrow->SetTipLength(0.3);
@@ -693,13 +696,14 @@ void syncScene(PreviewScene *scene, const SceneState &state)
         scene->stlPath = state.stlPath;
         scene->rawStl = readStl(state.stlPath);
     }
-    if (newStl || scene->rotation != state.rotation) {
+    if (newStl || scene->rotation != state.rotation || scene->twoDimensional != state.twoDimensional) {
         scene->rotation = state.rotation;
+        scene->twoDimensional = state.twoDimensional;
         auto surface = rotatedSurface(scene->rawStl, state.rotation);
         scene->hasStl = surface != nullptr;
         scene->stlMapper->SetInputData(surface ? surface.Get() : vtkNew<vtkPolyData>().Get());
         if (surface)
-            buildTunnelPreview(scene, surface);
+            buildTunnelPreview(scene, surface, state.twoDimensional);
         reframe = true;
     }
     const CasePreview *preview = state.preview.get();
@@ -748,7 +752,7 @@ QQuickVTKItem::vtkUserData VtkView::initializeVTK(vtkRenderWindow *renderWindow)
     auto scene = vtkSmartPointer<PreviewScene>::New();
     setupScene(scene);
     renderWindow->AddRenderer(scene->renderer);
-    syncScene(scene, {m_stlFile, m_modelRotation, m_viewInsets, size(), m_preview, m_colorMap, m_darkTheme});
+    syncScene(scene, {m_stlFile, m_modelRotation, m_twoDimensional, m_viewInsets, size(), m_preview, m_colorMap, m_darkTheme});
     return scene;
 }
 #else
@@ -807,6 +811,15 @@ void VtkView::setModelRotation(const QVector3D &rotation)
         return;
     m_modelRotation = rotation;
     emit modelRotationChanged();
+    updateScene();
+}
+
+void VtkView::setTwoDimensional(bool twoDimensional)
+{
+    if (m_twoDimensional == twoDimensional)
+        return;
+    m_twoDimensional = twoDimensional;
+    emit twoDimensionalChanged();
     updateScene();
 }
 
@@ -969,7 +982,7 @@ void VtkView::applyJobResult(int generation, std::shared_ptr<const CaseData> dat
 void VtkView::updateScene()
 {
 #ifdef TOOFAN_HAS_VTK
-    dispatch_async([state = SceneState{m_stlFile, m_modelRotation, m_viewInsets, size(), m_preview, m_colorMap, m_darkTheme}](vtkRenderWindow *, vtkUserData userData) {
+    dispatch_async([state = SceneState{m_stlFile, m_modelRotation, m_twoDimensional, m_viewInsets, size(), m_preview, m_colorMap, m_darkTheme}](vtkRenderWindow *, vtkUserData userData) {
         if (auto scene = PreviewScene::SafeDownCast(userData))
             syncScene(scene, state);
     });

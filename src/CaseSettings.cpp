@@ -23,6 +23,7 @@ void CaseSettings::restoreDefaults()
     maxCourant = defaults.maxCourant;
     writeCount = defaults.writeCount;
     surfaceLayers = defaults.surfaceLayers;
+    twoDimensional = defaults.twoDimensional;
     processors = defaults.processors;
     emit changed();
 }
@@ -41,5 +42,6 @@ void CaseSettings::apply(CaseOptions *options) const
     options->maxCourant = maxCourant;
     options->writeCount = writeCount;
     options->surfaceLayers = surfaceLayers;
+    options->twoDimensional = twoDimensional;
     options->processors = std::max(processors, 1);
 }

@@ -122,6 +122,21 @@ ColumnLayout {
         value: root.settings.surfaceLayers
         onEdited: v => root.settings.surfaceLayers = v
     }
+    RowLayout {
+        spacing: 8
+        Label { text: "2D section"; color: Theme.text; font.pixelSize: 12; Layout.fillWidth: true }
+        Switch {
+            checked: root.settings.twoDimensional
+            onToggled: root.settings.twoDimensional = checked
+        }
+    }
+    Label {
+        Layout.fillWidth: true
+        text: root.settings.twoDimensional
+              ? "The model is a section extruded along y (a cylinder, an aerofoil) spanning the tunnel; the mesh is one cell thick."
+              : "Off: a 3D tunnel around the whole model."
+        color: Theme.faint; font.pixelSize: 11; wrapMode: Text.WordWrap
+    }
 
     SectionTitle { text: "PARALLEL" }
     NumberField {

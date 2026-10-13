@@ -1,0 +1,29 @@
+{% if twoD.enabled %}{% include "banner" %}
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      extrudeMeshDict;
+}
+
+// 2D: replaces the slab snappyHexMesh made with one layer of cells extruded from its front face.
+constructFrom   patch;
+sourceCase      "$FOAM_CASE";
+sourcePatches   (front);
+exposedPatchName back;
+flipNormals     true;    // into the slab
+
+extrudeModel    linearNormal;
+nLayers         1;
+expansionRatio  1.0;
+linearNormalCoeffs
+{
+    thickness   {{ twoD.thickness }};
+}
+
+mergeFaces      false;
+mergeTol        0;
+
+// ************************************************************************* //
+{% endif %}

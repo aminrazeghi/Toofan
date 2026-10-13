@@ -37,6 +37,8 @@ class VtkView : public QQuickItem
     Q_PROPERTY(QString field READ field WRITE setField NOTIFY fieldChanged)
     // Orientation of the imported STL, degrees about x, then y, then z (as the case will be meshed).
     Q_PROPERTY(QVector3D modelRotation READ modelRotation WRITE setModelRotation NOTIFY modelRotationChanged)
+    // 2D case: the tunnel preview spans the model along y and is sized from its x-z section.
+    Q_PROPERTY(bool twoDimensional READ twoDimensional WRITE setTwoDimensional NOTIFY twoDimensionalChanged)
     // Window edges covered by floating panels, in item pixels (left, top, right, bottom). The model
     // is centred and framed in the uncovered area, and the color bar kept inside it.
     Q_PROPERTY(QVector4D viewInsets READ viewInsets WRITE setViewInsets NOTIFY viewInsetsChanged)
@@ -67,6 +69,8 @@ public:
     QString field() const { return m_field; }
     void setField(const QString &field);
     QVector3D modelRotation() const { return m_modelRotation; }
+    bool twoDimensional() const { return m_twoDimensional; }
+    void setTwoDimensional(bool twoDimensional);
     void setModelRotation(const QVector3D &rotation);
     QVector4D viewInsets() const { return m_viewInsets; }
     void setViewInsets(const QVector4D &insets);
@@ -96,6 +100,7 @@ signals:
     void renderModeChanged();
     void fieldChanged();
     void modelRotationChanged();
+    void twoDimensionalChanged();
     void viewInsetsChanged();
     void colorMapChanged();
     void darkThemeChanged();
@@ -120,6 +125,7 @@ private:
     QString m_renderMode = QStringLiteral("slice");
     QString m_field = QStringLiteral("U");
     QVector3D m_modelRotation;
+    bool m_twoDimensional = false;
     QVector4D m_viewInsets;
     QString m_colorMap = QStringLiteral("viridis");
     bool m_darkTheme = true;
