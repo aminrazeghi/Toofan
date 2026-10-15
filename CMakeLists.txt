@@ -22,7 +22,8 @@ qt_add_qml_module(toofan URI Toofan VERSION 1.0 QML_FILES
   qml/Theme.qml qml/NumberField.qml qml/AdvancedSettings.qml qml/SettingsDialog.qml qml/OrientationControl.qml
   qml/AboutDialog.qml qml/FloatingPanel.qml qml/IconGlyph.qml qml/PathWarningDialog.qml qml/ExamplesDialog.qml
   qml/ViewGizmo.qml)
-qt_add_resources(toofan app_assets PREFIX "/" FILES assets/toofan-icon.svg assets/toofan-logo.svg)
+qt_add_resources(toofan app_assets PREFIX "/" FILES assets/toofan-icon.svg assets/toofan-logo.svg
+  assets/icons/view-domain.svg assets/icons/view-slice.svg assets/icons/view-streamlines.svg)
 file(GLOB_RECURSE TOOFAN_CASE_TEMPLATES CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" templates/windTunnel/*)
 list(FILTER TOOFAN_CASE_TEMPLATES EXCLUDE REGEX "\\.md$")
 qt_add_resources(toofan case_templates PREFIX "/" FILES ${TOOFAN_CASE_TEMPLATES})

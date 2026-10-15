@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round">
+  <!-- Flow lines bending around the model -->
+  <path d="M2 5.5 C7 5.5 9 4 12 4 S17 5.5 22 5.5"/>
+  <path d="M2 9.5 C6 9.5 8 7.5 12 7.5 S18 9.5 22 9.5"/>
+  <path d="M2 14.5 C6 14.5 8 16.5 12 16.5 S18 14.5 22 14.5"/>
+  <path d="M2 18.5 C7 18.5 9 20 12 20 S17 18.5 22 18.5"/>
+  <ellipse cx="12" cy="12" rx="3.2" ry="1.8" fill="#ffffff" stroke="none"/>
+</svg>

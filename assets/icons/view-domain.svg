@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+  <!-- Whole tunnel: a box with the model inside -->
+  <path d="M3 8.5 L8 4.5 H21 V15.5 L16 19.5 H3 Z"/>
+  <path d="M3 8.5 H16 V19.5 M16 8.5 L21 4.5"/>
+  <ellipse cx="10.5" cy="13.5" rx="3" ry="1.6" fill="#ffffff" stroke="none"/>
+</svg>

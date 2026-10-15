@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+  <!-- Mid-plane cut through the model -->
+  <path d="M2.5 15.5 L8.5 8.5 H21.5 L15.5 15.5 Z" fill="#ffffff" fill-opacity="0.35"/>
+  <path d="M12 4 V20" stroke-dasharray="2 2.2"/>
+  <ellipse cx="12" cy="12" rx="2.6" ry="1.4" fill="#ffffff" stroke="none"/>
+</svg>

@@ -550,7 +550,9 @@ ApplicationWindow {
             y: (timeline.shown ? timeline.y : consolePanel.y) - gap - height
             SegmentedControl {
                 id: modeControl
-                options: [{ value: "domain", label: "Full domain" }, { value: "slice", label: "Slice" }, { value: "streamlines", label: "Streamlines" }]
+                options: [{ value: "domain", icon: "qrc:/assets/icons/view-domain.svg", tip: "Full domain" },
+                          { value: "slice", icon: "qrc:/assets/icons/view-slice.svg", tip: "Slice" },
+                          { value: "streamlines", icon: "qrc:/assets/icons/view-streamlines.svg", tip: "Streamlines" }]
                 current: vtkView.renderMode
                 onActivated: value => vtkView.renderMode = value
             }
