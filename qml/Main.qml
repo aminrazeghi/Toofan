@@ -277,13 +277,14 @@ ApplicationWindow {
                 spacing: 8
                 ToolButton {
                     enabled: !simulation.running
-                    ToolTip.visible: hovered; ToolTip.text: "New project"
+                    ToolTip.visible: hovered
+                    ToolTip.text: "New simulation"
                     onClicked: {
                         simulation.newProject()
                         setupPanel.userCollapsed = false
                         openPlot = ""
                     }
-                    contentItem: Item { IconGlyph { anchors.centerIn: parent; kind: "plus"; color: parent.parent.enabled ? Theme.muted : Theme.faint } }
+                    contentItem: Item { SvgIcon { anchors.centerIn: parent; source: "qrc:/assets/icons/new-simulation.svg"; color: parent.parent.enabled ? Theme.muted : Theme.faint } }
                     background: Rectangle { radius: 9; color: parent.hovered ? Theme.controlHover : "transparent"; implicitWidth: 38; implicitHeight: 38 }
                 }
                 ToolButton {

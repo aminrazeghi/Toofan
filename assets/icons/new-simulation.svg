@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+  <!-- A blank page with a plus: start over -->
+  <path d="M13 3.5 H6 A1.5 1.5 0 0 0 4.5 5 V19 A1.5 1.5 0 0 0 6 20.5 H12"/>
+  <path d="M13 3.5 L18.5 9 V12.5 M13 3.5 V9 H18.5"/>
+  <path d="M18 15 V21 M15 18 H21"/>
+</svg>

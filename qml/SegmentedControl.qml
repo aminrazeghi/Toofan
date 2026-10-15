@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Effects
 
 // Row of mutually exclusive options, styled like the run setup buttons.
 Rectangle {
@@ -40,19 +39,11 @@ Rectangle {
                     color: parent.foreground
                     font.pixelSize: 12
                 }
-                Image {
-                    id: icon
+                SvgIcon {
                     anchors.centerIn: parent
-                    visible: false // drawn through the effect below
-                    source: modelData.icon ?? ""
-                    sourceSize: Qt.size(18, 18)
-                }
-                MultiEffect {
-                    anchors.fill: icon
                     visible: !!modelData.icon
-                    source: icon
-                    colorization: 1
-                    colorizationColor: parent.foreground
+                    source: modelData.icon ?? ""
+                    color: parent.foreground
                 }
                 ToolTip.visible: !!modelData.tip && hover.hovered
                 ToolTip.text: modelData.tip ?? ""
