@@ -38,7 +38,7 @@ ApplicationWindow {
         id: appSettings
         category: "appearance"
         property bool darkTheme: true
-        property string colorMap: "viridis"
+        property string colorMap: "rainbow"
     }
     Binding { target: Theme; property: "dark"; value: appSettings.darkTheme }
 
