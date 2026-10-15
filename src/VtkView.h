@@ -54,6 +54,10 @@ class VtkView : public QQuickItem
     Q_PROPERTY(int timeIndex READ timeIndex WRITE setTimeIndex NOTIFY timeIndexChanged)
     // True while the case is being read or the view rebuilt in the background.
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
+    // Camera orientation, as unit vectors: the view direction (from the camera to its focal point)
+    // and the screen's up direction. Follows the user's rotation, for an orientation gizmo.
+    Q_PROPERTY(QVector3D viewDirection READ viewDirection NOTIFY cameraChanged)
+    Q_PROPERTY(QVector3D viewUp READ viewUp NOTIFY cameraChanged)
 
 public:
     explicit VtkView(QQuickItem *parent = nullptr);
@@ -85,6 +89,13 @@ public:
     void setTimeIndex(int index);
     QString previewInfo() const { return m_previewInfo; }
     bool loading() const { return m_loading; }
+    QVector3D viewDirection() const { return m_viewDirection; }
+    QVector3D viewUp() const { return m_viewUp; }
+    // Looks at the shown model from the side `axis` points to (e.g. (1, 0, 0): from +x), framed
+    // like the default view. Up is +z, or ±y when looking along z, so x stays to the right.
+    Q_INVOKABLE void viewFrom(const QVector3D &axis);
+    // Back to the default view of the shown model.
+    Q_INVOKABLE void resetView();
 
 #ifdef TOOFAN_HAS_VTK
     static void setGraphicsApi();
@@ -108,6 +119,7 @@ signals:
     void loadingChanged();
     void timesChanged();
     void timeIndexChanged();
+    void cameraChanged();
 
 private:
     void requestCasePreview(bool reread);
@@ -118,6 +130,8 @@ private:
     void setPreviewInfo(const QString &info);
     void setLoading(bool loading);
     void setTimes(const QList<double> &times);
+    void setCamera(const QVector3D &direction, const QVector3D &up);
+    void frameView(const QVector3D &axis);
 
     QString m_stlFile;
     QString m_casePath;
@@ -132,6 +146,8 @@ private:
     QString m_previewInfo;
     QList<double> m_times;
     int m_timeIndex = -1;
+    QVector3D m_viewDirection{0, 1, 0};
+    QVector3D m_viewUp{0, 0, 1};
     // GUI thread state. Background jobs read the case (when m_rereadPending) and build the
     // preview for the current mode and field from the cached data.
     std::shared_ptr<const CaseData> m_data;       // latest case read from disk

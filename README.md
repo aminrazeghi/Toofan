@@ -39,7 +39,9 @@ develops.
 - **3D results** (VTK): full domain, mid-plane slice or streamlines, colored by
   U, p, the turbulence fields of the chosen model (k, ω, ε or ν̃), and for
   compressible runs also T, ρ and Ma. The view
-  updates as the mesh is generated and as time steps are written.
+  updates as the mesh is generated and as time steps are written. In 3D, an
+  orientation gizmo shows the camera's axes; click an axis to view the model
+  from that side, or the home button for the default view.
 - **Playback**: after a run, play/pause through the saved time steps or scrub
   to any of them with a slider.
 - **Interface**: frameless single-window layout with floating panels, dark and

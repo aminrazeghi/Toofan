@@ -37,6 +37,7 @@ const ColorMap &colorMapNamed(const QString &name)
 #include <vtkTextActor.h>
 #include <vtkBillboardTextActor3D.h>
 #include <vtkAppendPolyData.h>
+#include <vtkCallbackCommand.h>
 #include <vtkCamera.h>
 #include <vtkColorTransferFunction.h>
 #include <vtkCompositeDataSet.h>
@@ -72,6 +73,7 @@ const ColorMap &colorMapNamed(const QString &name)
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
 
 // One time step of the case as read from disk. Only worker jobs touch it (one at a time): VTK
@@ -402,6 +404,10 @@ public:
     vtkSmartPointer<vtkPolyData> rawStl;         // STL as read, before rotation
     QVector3D rotation;                          // rotation applied in stlMapper
     bool twoDimensional = false;                 // tunnel preview drawn for a 2D case
+    // Called (on the render thread) after a render that moved the camera: view direction, up.
+    std::function<void(const QVector3D &, const QVector3D &)> cameraMoved;
+    vtkNew<vtkCallbackCommand> cameraWatch;
+    QVector3D reportedDirection, reportedUp;
     double tunnelView[6] = {0, -1, 0, -1, 0, -1}; // tunnel plus inlet arrow, for framing
     QString stlPath;                             // STL currently in stlMapper
     bool hasStl = false;
@@ -428,6 +434,8 @@ void styleModel(vtkActor *actor)
     actor->GetProperty()->SetMetallic(0.18);
     actor->GetProperty()->SetRoughness(0.35);
 }
+
+void watchCamera(vtkObject *, unsigned long, void *clientData, void *);
 
 void setupScene(PreviewScene *scene)
 {
@@ -498,6 +506,14 @@ void setupScene(PreviewScene *scene)
     scene->axes->SetShaftTypeToCylinder();
     scene->axes->SetCylinderRadius(0.03);
     scene->axes->SetConeRadius(0.3);
+    // Same colors as the orientation gizmo (qml/ViewGizmo.qml).
+    const double axisColors[3][3] = {{0.90, 0.33, 0.31}, {0.30, 0.71, 0.36}, {0.33, 0.47, 0.96}};
+    vtkProperty *const axisProperties[3][2] = {{scene->axes->GetXAxisShaftProperty(), scene->axes->GetXAxisTipProperty()},
+                                               {scene->axes->GetYAxisShaftProperty(), scene->axes->GetYAxisTipProperty()},
+                                               {scene->axes->GetZAxisShaftProperty(), scene->axes->GetZAxisTipProperty()}};
+    for (int i = 0; i < 3; ++i)
+        for (vtkProperty *property : axisProperties[i])
+            property->SetColor(axisColors[i][0], axisColors[i][1], axisColors[i][2]);
     for (vtkCaptionActor2D *caption : {scene->axes->GetXAxisCaptionActor2D(), scene->axes->GetYAxisCaptionActor2D(),
                                        scene->axes->GetZAxisCaptionActor2D()}) {
         vtkTextProperty *text = caption->GetCaptionTextProperty();
@@ -511,24 +527,59 @@ void setupScene(PreviewScene *scene)
     renderer->AddViewProp(scene->axes);
     scene->scalarBar->VisibilityOff();
     renderer->AddViewProp(scene->scalarBar);
+
+    scene->cameraWatch->SetCallback(watchCamera);
+    scene->cameraWatch->SetClientData(scene);
+    renderer->AddObserver(vtkCommand::EndEvent, scene->cameraWatch);
 }
 
-// Side view along +y with the flow (+x) running left to right. `visible` is the uncovered
-// fraction of the window, so the framed region fits between the floating panels.
-void frameCamera(vtkRenderer *renderer, const double bounds[6], double visible)
+// Side view along +y with the flow (+x) running left to right, or, given `direction` (camera to
+// focal point) and `up`, a view along it. `visible` is the uncovered fraction of the window, so
+// the framed region fits between the floating panels.
+void frameCamera(vtkRenderer *renderer, const double bounds[6], double visible,
+                 const QVector3D &direction = {}, const QVector3D &up = {})
 {
     if (bounds[0] > bounds[1])
         return;
     vtkCamera *camera = renderer->GetActiveCamera();
-    camera->SetFocalPoint(0.5 * (bounds[0] + bounds[1]), 0.5 * (bounds[2] + bounds[3]), 0.5 * (bounds[4] + bounds[5]));
-    camera->SetPosition(0.5 * (bounds[0] + bounds[1]), bounds[2] - 1.0, 0.5 * (bounds[4] + bounds[5]));
-    camera->SetViewUp(0, 0, 1);
+    const QVector3D centre(0.5 * (bounds[0] + bounds[1]), 0.5 * (bounds[2] + bounds[3]), 0.5 * (bounds[4] + bounds[5]));
+    const bool side = direction.isNull();
+    const QVector3D position = centre - (side ? QVector3D(0, 1, 0) : direction);
+    camera->SetFocalPoint(centre.x(), centre.y(), centre.z());
+    camera->SetPosition(position.x(), position.y(), position.z());
+    camera->SetViewUp(side ? 0 : up.x(), side ? 0 : up.y(), side ? 1 : up.z());
     camera->SetViewAngle(30); // Zoom() below narrows it; start from the default on every reframe
     renderer->ResetCamera(bounds);
-    camera->Azimuth(-12);
-    camera->Elevation(10);
+    if (side) {
+        camera->Azimuth(-12);
+        camera->Elevation(10);
+    }
     camera->Zoom(1.5 * visible); // ResetCamera fits a bounding sphere, which leaves a wide margin
     renderer->ResetCameraClippingRange();
+}
+
+// What the camera frames: the case preview's focus, else the tunnel around the STL; null if neither.
+const double *framedBounds(const PreviewScene *scene)
+{
+    if (scene->preview)
+        return scene->preview->focus;
+    return scene->hasStl ? scene->tunnelView : nullptr;
+}
+
+// Reports the camera orientation after each render in which it changed.
+void watchCamera(vtkObject *, unsigned long, void *clientData, void *)
+{
+    auto *scene = static_cast<PreviewScene *>(clientData);
+    vtkCamera *camera = scene->renderer->GetActiveCamera();
+    double d[3], u[3];
+    camera->GetDirectionOfProjection(d);
+    camera->GetViewUp(u);
+    const QVector3D direction(d[0], d[1], d[2]), up = QVector3D(u[0], u[1], u[2]).normalized();
+    if (!scene->cameraMoved || (qFuzzyCompare(direction, scene->reportedDirection) && qFuzzyCompare(up, scene->reportedUp)))
+        return;
+    scene->reportedDirection = direction;
+    scene->reportedUp = up;
+    scene->cameraMoved(direction, up);
 }
 
 // Shift the projection so the view centre is the middle of the uncovered area, and keep the
@@ -733,11 +784,8 @@ void syncScene(PreviewScene *scene, const SceneState &state)
 
     applyInsets(scene, state.insets, state.size);
     if (reframe) {
-        if (preview) {
-            frameCamera(scene->renderer, preview->focus, visibleFraction(state));
-        } else if (scene->hasStl) {
-            frameCamera(scene->renderer, scene->tunnelView, visibleFraction(state));
-        }
+        if (const double *bounds = framedBounds(scene))
+            frameCamera(scene->renderer, bounds, visibleFraction(state));
     }
 }
 }
@@ -751,6 +799,12 @@ QQuickVTKItem::vtkUserData VtkView::initializeVTK(vtkRenderWindow *renderWindow)
 {
     auto scene = vtkSmartPointer<PreviewScene>::New();
     setupScene(scene);
+    // Runs on the render thread; the view may be gone by the time the GUI thread gets the call.
+    scene->cameraMoved = [view = QPointer<VtkView>(this)](const QVector3D &direction, const QVector3D &up) {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [view, direction, up] {
+            if (view) view->setCamera(direction, up);
+        }, Qt::QueuedConnection);
+    };
     renderWindow->AddRenderer(scene->renderer);
     syncScene(scene, {m_stlFile, m_modelRotation, m_twoDimensional, m_viewInsets, size(), m_preview, m_colorMap, m_darkTheme});
     return scene;
@@ -987,6 +1041,45 @@ void VtkView::updateScene()
             syncScene(scene, state);
     });
     scheduleRender();
+#endif
+}
+
+void VtkView::setCamera(const QVector3D &direction, const QVector3D &up)
+{
+    if (m_viewDirection == direction && m_viewUp == up)
+        return;
+    m_viewDirection = direction;
+    m_viewUp = up;
+    emit cameraChanged();
+}
+
+void VtkView::viewFrom(const QVector3D &axis)
+{
+    if (!axis.isNull())
+        frameView(axis.normalized());
+}
+
+void VtkView::resetView()
+{
+    frameView({});
+}
+
+// Reframes the shown model: the default view for a null axis, else the view from `axis`.
+void VtkView::frameView(const QVector3D &axis)
+{
+#ifdef TOOFAN_HAS_VTK
+    const QVector3D up = std::abs(axis.z()) > 0.9f ? QVector3D(0, axis.z() > 0 ? 1 : -1, 0) : QVector3D(0, 0, 1);
+    dispatch_async([state = SceneState{m_stlFile, m_modelRotation, m_twoDimensional, m_viewInsets, size(), m_preview, m_colorMap, m_darkTheme},
+                    axis, up](vtkRenderWindow *, vtkUserData userData) {
+        auto scene = PreviewScene::SafeDownCast(userData);
+        if (!scene)
+            return;
+        if (const double *bounds = framedBounds(scene))
+            frameCamera(scene->renderer, bounds, visibleFraction(state), -axis, up);
+    });
+    scheduleRender();
+#else
+    Q_UNUSED(axis)
 #endif
 }
 

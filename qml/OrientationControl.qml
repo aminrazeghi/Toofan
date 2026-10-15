@@ -21,8 +21,8 @@ ColumnLayout {
     }
 
     Repeater {
-        // Colors match the axes marker in the 3D view (vtkAxesActor defaults).
-        model: [{ name: "X", color: "#e05252" }, { name: "Y", color: "#d8c23a" }, { name: "Z", color: "#4cbf5a" }]
+        // Colors match the axes marker in the 3D view and the orientation gizmo.
+        model: [{ name: "X", color: "#e5544f" }, { name: "Y", color: "#4db55c" }, { name: "Z", color: "#5478f5" }]
         delegate: RowLayout {
             required property var modelData
             required property int index

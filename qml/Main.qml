@@ -194,7 +194,8 @@ ApplicationWindow {
                                     edge + brandBar.height + gap,
                                     edge + sideWidth + gap,
                                     edge + (consolePanel.expanded ? 170 : 40) + gap
-                                        + (timeline.shown ? timeline.height + gap : 0))
+                                        + (timeline.shown ? timeline.height + gap : 0)
+                                        + (viewControls.visible ? viewControls.height + gap : 0))
             // A new run or case shows (and follows) the latest time step again.
             onCasePathChanged: timeIndex = -1
             Connections {
@@ -526,19 +527,35 @@ ApplicationWindow {
             implicitWidth: previewLabel.implicitWidth + 20; implicitHeight: previewLabel.implicitHeight + 12
             Label { id: previewLabel; anchors.centerIn: parent; text: vtkView.previewInfo + (vtkView.loading ? (vtkView.previewInfo ? "  ·  " : "") + "Updating…" : ""); color: Theme.text; font.pixelSize: 12 }
         }
-        Column {
+        // Camera orientation, top right of the view; 2D cases keep their side view.
+        ViewGizmo {
+            id: viewGizmo
+            visible: simulation.stlPath.length > 0 && !vtkView.twoDimensional
+            anchors { right: resultsPanel.left; rightMargin: gap; top: resultsPanel.top }
+            viewDirection: vtkView.viewDirection
+            viewUp: vtkView.viewUp
+            onAxisClicked: axis => vtkView.viewFrom(axis)
+            onHomeClicked: vtkView.resetView()
+        }
+        // What the view shows, bottom centre above the timeline.
+        Grid {
             id: viewControls
             visible: simulation.previewRevision > 0
-            anchors { right: resultsPanel.left; rightMargin: gap; top: resultsPanel.top }
+            readonly property real areaLeft: setupPanel.x + setupPanel.width + gap
+            readonly property real areaRight: (plotPanel.shown ? plotPanel.x : resultsPanel.x) - gap
+            columns: modeControl.implicitWidth + fieldControl.implicitWidth + spacing <= areaRight - areaLeft ? 2 : 1
+            horizontalItemAlignment: Grid.AlignHCenter
             spacing: 8
+            x: areaLeft + (areaRight - areaLeft - width) / 2
+            y: (timeline.shown ? timeline.y : consolePanel.y) - gap - height
             SegmentedControl {
-                anchors.right: parent.right
+                id: modeControl
                 options: [{ value: "domain", label: "Full domain" }, { value: "slice", label: "Slice" }, { value: "streamlines", label: "Streamlines" }]
                 current: vtkView.renderMode
                 onActivated: value => vtkView.renderMode = value
             }
             SegmentedControl {
-                anchors.right: parent.right
+                id: fieldControl
                 options: [{ value: "U", label: "U" }, { value: "p", label: "p" }]
                          .concat(turbulenceFields(simulation.settings.turbulenceModel))
                          .concat(simulation.solver === "rhoPimpleFoam" ? [{ value: "T", label: "T" }, { value: "rho", label: "ρ" }, { value: "Ma", label: "Ma" }] : [])
@@ -629,7 +646,7 @@ ApplicationWindow {
             readonly property real buttonCenter: anchorButton
                 ? resultsPanel.y + resultsColumn.y + resultsBody.y + anchorButton.y + anchorButton.height / 2
                 : resultsPanel.y + resultsPanel.height / 2
-            y: Math.max(viewControls.visible ? viewControls.y + viewControls.height + gap : actionBar.y + actionBar.height + gap, Math.min(buttonCenter - height / 2, consolePanel.y - gap - height))
+            y: Math.max(viewGizmo.visible ? viewGizmo.y + viewGizmo.height + gap : actionBar.y + actionBar.height + gap, Math.min(buttonCenter - height / 2, consolePanel.y - gap - height))
             opacity: shown ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 180 } }
             visible: opacity > 0
